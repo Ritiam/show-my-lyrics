@@ -1,37 +1,106 @@
-import time
-
-import customtkinter as ctk
-
-# Set appearance mode and color theme
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+import sys
+from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QGraphicsOpacityEffect
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, pyqtProperty
+from PyQt6.QtGui import QFont, QColor, QPalette, QFontMetrics, QKeyEvent
 
 
 
+class CustomLabel(QLabel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._font_size = 10
+        self._font_family = "Arial"
+        self._y_position = 0
 
-class DisplayWindow(ctk.CTk):
-    def __init__(self, font="Arial", size=60, color="#D886D2", opacity=0.8, position=(2, 1), alignment="e"):
+        self.setWordWrap(True)
+
+        # Create opacity effect for the label
+        self._opacity_effect = QGraphicsOpacityEffect()
+        self._opacity_effect.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacity_effect)
+
+    @pyqtProperty(float)
+    def font_size(self):
+        return self._font_size
+
+    @font_size.setter
+    def font_size(self, size):
+        self._font_size = size
+        # Update the font when size changes
+        current_font = self.font()
+        current_font.setPointSizeF(size)
+        self.setFont(current_font)
+        # Update position when font size changes
+        self.update_position()
+
+    @pyqtProperty(float)
+    def opacity(self):
+        if self._opacity_effect:
+            return self._opacity_effect.opacity()
+        return 1.0
+
+    @opacity.setter
+    def opacity(self, value):
+        if self._opacity_effect:
+            self._opacity_effect.setOpacity(value)
+
+    @pyqtProperty(float)
+    def y_position(self):
+        return self._y_position
+
+    @y_position.setter
+    def y_position(self, value):
+        self._y_position = value
+        self.update_position()
+
+    def update_position(self):
+        # Calculate y position based on font size
+        font = QFont(self._font_family, int(self._font_size))
+        font.setBold(True)
+        metrics = QFontMetrics(font)
+        text_height = metrics.height()
+        y_pos = int(self._y_position - (text_height // 2))
+        self.setGeometry(0, y_pos, 640, 1080)
+
+        font_type = ""
+        if self.parent().chosen_italic: font_type += "italic "
+        if self.parent().chosen_bold: font_type += "bold "
+
+        style_sheet = f"font: {font_type}{self._font_size}px {self._font_family}; color: {self.parent().chosen_color if self.parent() else '#FFFFFF'}; padding-left: 20px; padding-right: 20px;"
+        if self.parent().chosen_underline: style_sheet += "text-decoration: underline;"
+
+
+        self.setStyleSheet(style_sheet)
+
+
+
+
+class DisplayWindow(QMainWindow):
+    def __init__(self, font="Arial", size=40, color="#FFFFFF", opacity=0.8, position=(2, 1), alignment=2, bold=False, italic=False, underline=False):
         super().__init__()
-        self.title("Display")
-        self.geometry(f"640x360+{640*position[0]}+{360*position[1]}")
-        self.resizable(False, False)
-        self.invisible_color = self.DarkenHex(color)
-        self.wm_attributes("-transparentcolor", self.invisible_color)
-        self.configure(fg_color=self.invisible_color)
-        self.wm_attributes("-alpha", opacity)
-        self.overrideredirect(True)
-        self.attributes("-topmost", True)
-        self.lift()
-        self.wm_frame()
 
-        self.find_relx = {"w": 0.1, "center": 0.5, "e": 0.9}
-        self.chosen_relx = self.find_relx[alignment]
+        # Set the size
+        self.setWindowTitle("Display")
+        self.setGeometry(640*position[0], 0, 640, 1080)
+        self.setFixedSize(640, 1080)
 
-        self.total_anim_frame = 160  # Number of animation frames
-        self.animation_delay = 2  # Delay between frames in ms
-        self.is_animating = False
+        # Apply the opacity and make the window stay on top
+        self.setWindowOpacity(opacity)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
 
+        # Set transparent background
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+
+
+        # Store settings
         self.chosen_font = font
+        self.chosen_bold = bold
+        self.chosen_italic = italic
+        self.chosen_underline = underline
         self.chosen_size = size
         self.chosen_color = color
         self.chosen_opacity = opacity
@@ -39,198 +108,166 @@ class DisplayWindow(ctk.CTk):
         self.chosen_alignment = alignment
         self.wrap_length = 576
 
-        # Lyrics
-        self.lyrics0 = ctk.CTkLabel(self, text="", font=("Arial", int(size)//1.5, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.lyrics0.place(relx=self.chosen_relx, y=108, anchor=self.chosen_alignment)
-
-        self.lyrics1 = ctk.CTkLabel(self, text="Loading", font=("Arial", int(size), "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.lyrics1.place(relx=self.chosen_relx, y=180, anchor=self.chosen_alignment)
-
-        self.lyrics2 = ctk.CTkLabel(self, text="", font=("Arial", int(size)//1.5, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.lyrics2.place(relx=self.chosen_relx, y=288, anchor=self.chosen_alignment)
-
-        self.lyrics3 = ctk.CTkLabel(self, text="", font=("Arial", int(size)//5, "bold"), text_color=self.invisible_color, wraplength=self.wrap_length)
-        self.lyrics3.place(relx=self.chosen_relx, y=324, anchor=self.chosen_alignment)
-
-        # Preview
-        self.preview_frame = ctk.CTkFrame(self, width=640, height=360, corner_radius=0, bg_color=self.DarkenHex(self.chosen_color,60))
-        self.preview_frame.place(x=0, y=0)
-
-        self.pr_lyric0 = ctk.CTkLabel(self.preview_frame, text="old lyrics here", font=("Arial", int(size) // 1.5, "bold"),
-                                    text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.pr_lyric0.place(relx=self.chosen_relx, y=108, anchor=self.chosen_alignment)
-
-        self.pr_lyric1 = ctk.CTkLabel(self.preview_frame, text="current lyrics here", font=("Arial", int(size), "bold"),
-                                    text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.pr_lyric1.place(relx=self.chosen_relx, y=180, anchor=self.chosen_alignment)
-
-        self.pr_lyric2 = ctk.CTkLabel(self.preview_frame, text="future lyrics here", font=("Arial", int(size) // 1.5, "bold"),
-                                    text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.pr_lyric2.place(relx=self.chosen_relx, y=288, anchor=self.chosen_alignment)
-
-
-
+        self.lyrics0 = CustomLabel("Old lyrics", self)
+        self.lyrics1 = CustomLabel("Current lyrics", self)
+        self.lyrics2 = CustomLabel("Future lyrics", self)
+        self.lyrics3 = CustomLabel("Hidden lyrics", self)
 
         self.lyrics_arr = [self.lyrics0, self.lyrics1, self.lyrics2, self.lyrics3]
 
-        self.start_pos = [108, 180, 288, 324]
-        self.target_pos = [36, 108, 180, 288]
-        self.start_size = [int(self.chosen_size)/1.5, int(self.chosen_size), int(self.chosen_size)/1.5, int(self.chosen_size)/3]
-        self.target_size = [int(self.chosen_size)/3, int(self.chosen_size)/1.5, int(self.chosen_size), int(self.chosen_size)/1.5]
+        self.CalculatePositions()
 
-        self.current_lyrics_data = ["", "", "", ""]
+        for ind, lyrics in enumerate(self.lyrics_arr):
+            lyrics.setGeometry(0, int(self.start_pos[ind]), 640, 1080)
 
-        self.focus_set()
+        self.animation_duration = 500
+        self.is_animating = False
 
-    def UpdateLyrics(self, lyrics_data):
-        self.current_lyrics_data = lyrics_data.copy()
-
-        # Update the text content of the labels
-        for i, lyric in enumerate(lyrics_data):
-            if i < len(self.lyrics_arr):
-                self.lyrics_arr[i].configure(text=lyric)
-
-        # Trigger animation
-        self.Step()
-    def UpdateSettings(self, font=None, size=None, color=None, opacity=None, position=None, alignment=None):
-
-        if font is not None:
-            self.chosen_font = font
-        if size is not None:
-            self.chosen_size = size
-        if color is not None:
-            self.chosen_color = color
-            self.invisible_color = self.DarkenHex(color)
-        if opacity is not None:
-            self.chosen_opacity = opacity
-            self.wm_attributes("-alpha", opacity)
-        if position is not None:
-            self.chosen_position = position
-            self.geometry(f"640x360+{640 * position[0]}+{360 * position[1]}")
-        if alignment is not None:
-            self.chosen_alignment = alignment
-            self.chosen_relx = self.find_relx[alignment]
+        self.LoadLyricsStyle()
 
 
-        self.RefreshLyrics()
 
-    def RefreshLyrics(self):
-        size = int(self.chosen_size)
+    def LoadLyricsStyle(self):
+        for ind, lyrics in enumerate(self.lyrics_arr):
+            if self.chosen_alignment == 0:
+                lyrics.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            elif self.chosen_alignment == 1:
+                lyrics.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+            elif self.chosen_alignment == 2:
+                lyrics.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
 
-        # Update fonts and colors for all labels
-        self.lyrics0.configure(font=(self.chosen_font, size // 1.5, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.lyrics1.configure(font=(self.chosen_font, size, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.lyrics2.configure(font=(self.chosen_font, size // 1.5, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.lyrics3.configure(font=(self.chosen_font, size // 5, "bold"), text_color=self.invisible_color, wraplength=self.wrap_length)
+            font_type = ""
+            if self.chosen_italic: font_type += "italic "
+            if self.chosen_bold: font_type += "bold "
 
-        self.preview_frame.configure(bg_color=self.DarkenHex(self.chosen_color, 60))
+            style_sheet = f"font: {font_type}{self.start_size[ind]}px {self.chosen_font}; color: {self.chosen_color}; padding-left: 20px; padding-right: 20px;"
+            if self.chosen_underline: style_sheet += "text-decoration: underline;"
 
-        self.pr_lyric0.configure(font=(self.chosen_font, size // 1.5, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.pr_lyric1.configure(font=(self.chosen_font, size, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
-        self.pr_lyric2.configure(font=(self.chosen_font, size // 1.5, "bold"), text_color=self.chosen_color, wraplength=self.wrap_length)
+            self.lyrics_arr[ind].setStyleSheet(style_sheet)
 
-        self.pr_lyric0.place(relx=self.chosen_relx, anchor=self.chosen_alignment)
-        self.pr_lyric1.place(relx=self.chosen_relx, anchor=self.chosen_alignment)
-        self.pr_lyric2.place(relx=self.chosen_relx, anchor=self.chosen_alignment)
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() == Qt.Key.Key_Space and not self.is_animating:
+            self.Animate()
+        super().keyPressEvent(event)
+
+    def Animate(self):
+        self.is_animating = True
+
+        # Create animation group
+        self.animation_group = QParallelAnimationGroup()
+
+        for i, lyrics in enumerate(self.lyrics_arr):
+
+            start_pos = self.start_pos[i]
+            start_size = self.start_size[i]
+
+            target_pos = self.target_pos[i]
+            target_size = self.target_size[i]
+
+            if i == 0:
+                start_opacity = 1.0
+                target_opacity = 0.0
+            elif i == 3:
+                start_opacity = 0.0
+                target_opacity = 1.0
+            else:
+                start_opacity = 1.0
+                target_opacity = 1.0
+
+            # Create position animation
+            pos_animation = QPropertyAnimation(lyrics, b"y_position")
+            pos_animation.setDuration(self.animation_duration)
+            pos_animation.setStartValue(start_pos)
+            pos_animation.setEndValue(target_pos)
+            pos_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+            # Create font size animation
+            size_animation = QPropertyAnimation(lyrics, b"font_size")
+            size_animation.setDuration(self.animation_duration)
+            size_animation.setStartValue(start_size)
+            size_animation.setEndValue(target_size)
+            size_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+            # Create opacity animation
+            opacity_animation = QPropertyAnimation(lyrics, b"opacity")
+            opacity_animation.setDuration(self.animation_duration)
+            opacity_animation.setStartValue(start_opacity)
+            opacity_animation.setEndValue(target_opacity)
+            opacity_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+            self.animation_group.addAnimation(pos_animation)
+            self.animation_group.addAnimation(size_animation)
+            self.animation_group.addAnimation(opacity_animation)
 
 
-        # Update size arrays
+        # Start animation
+        self.animation_group.finished.connect(self.on_animation_finished)
+        self.animation_group.start()
+    def on_animation_finished(self):
+        self.is_animating = False
+
+    def UpdateCustomization(self, font="Arial", size=40, color="#FFFFFF", opacity=0.8, position=(2, 1), alignment=2, bold=False, italic=False, underline=False):
+
+        # Set the window position
+        self.setGeometry(640 * position[0], 0, 640, 1080)
+
+        self.chosen_font = font
+        self.chosen_size = size
+        self.chosen_color = color
+        self.chosen_opacity = opacity
+        self.chosen_position = position
+        self.chosen_alignment = alignment
+        self.chosen_bold = bold
+        self.chosen_italic = italic
+        self.chosen_underline = underline
+
+        self.CalculatePositions()
+
+        # Update window opacity
+        self.setWindowOpacity(opacity / 100.0)
+
+        # Re-apply styling
+        self.LoadLyricsStyle()
+
+
+    def CalculatePositions(self):
+        new_dist = self.chosen_size * 6 / 5
+
+        if (self.chosen_position[1] == 0):
+            self.start_pos = [new_dist * 3, new_dist * 6, new_dist * 9, new_dist * 12]
+            self.target_pos = [0, new_dist * 3, new_dist * 6, new_dist * 9]
+
+        elif (self.chosen_position[1] == 1):
+            self.start_pos = [600 - new_dist * 4.5, 600 - new_dist * 1.5, 600 + new_dist * 1.5, 600 + new_dist * 4.5]
+            self.target_pos = [600 - new_dist * 7.5, 600 - new_dist * 4.5, 600 - new_dist * 1.5, 600 + new_dist * 1.5]
+
+        else:
+            self.start_pos = [1080 - new_dist * 10, 1080 - new_dist * 7, 1080 - new_dist * 4, 1080 - new_dist * 1]
+            self.target_pos = [1080 - new_dist * 13, 1080 - new_dist * 10, 1080 - new_dist * 7, 1080 - new_dist * 4]
+
         self.start_size = [self.chosen_size / 1.5, self.chosen_size, self.chosen_size / 1.5, self.chosen_size / 3]
         self.target_size = [self.chosen_size / 3, self.chosen_size / 1.5, self.chosen_size, self.chosen_size / 1.5]
 
-    # Functions
-    def Step(self):
-        if(self.is_animating): return
-        else:
-            self.is_animating = True
-            self.current_frame = 0
 
-            self.Animate()
+    def UpdateLyrics(self, lyrics_data):
+        if len(lyrics_data) >= 4:
+            for i, lyric in enumerate(lyrics_data[:4]):
+                if i < len(self.lyrics_arr):
+                    self.lyrics_arr[i].setText(lyric)
 
-
-    def Animate(self):
-
-        # Check if the animation finished
-        if self.current_frame >= self.total_anim_frame:
-            self.is_animating = False
-
-            temp = self.lyrics_arr.pop(0)
-            self.lyrics_arr.append(temp)
-
-            # Place labels at final positions
-            for i, label in enumerate(self.lyrics_arr):
-                label.place(relx=self.chosen_relx, y=self.start_pos[i], anchor=self.chosen_alignment)
-
-            return
-
-        # current step calculation and smoothing
-        t = self.current_frame / (self.total_anim_frame - 1)
-        t = 1 - (1 - t) ** 2
-
-        # Change positions
-        for i in range(len(self.start_pos)):
-            start_pos = self.start_pos[i]
-            target_pos = self.target_pos[i]
-            current_pos = start_pos + (target_pos - start_pos) * t
-
-            self.lyrics_arr[i].place(relx=self.chosen_relx, y=current_pos, anchor=self.chosen_alignment)
-
-        # Change sizes
-        for i in range(len(self.start_pos)):
-            start_size = self.start_size[i]
-            target_size = self.target_size[i]
-            current_size = start_size + (target_size - start_size) * t
-
-            self.lyrics_arr[i].configure(font=(self.chosen_font, current_size, "bold"))
-
-        # Change colors
-        fade_out_color = self.ChangeColor(self.chosen_color, self.invisible_color, t)
-        fade_in_color = self.ChangeColor(self.invisible_color, self.chosen_color, t)
-
-        self.lyrics_arr[0].configure(text_color=fade_out_color)
-        self.lyrics_arr[3].configure(text_color=fade_in_color)
+            if not self.is_animating:
+                self.Animate()
 
 
-        # Next frame plan
-        self.current_frame += 1
-        self.after(self.animation_delay, self.Animate)
+def main():
+    app = QApplication(sys.argv)
 
-    def ChangeColor(self, start_color, end_color, t):
+    # Create window with default settings
+    window = DisplayWindow()
+    window.show()
 
-        start_rgb = self.hex_to_rgb(start_color)
-        end_rgb = self.hex_to_rgb(end_color)
-
-        # Interpolate each RGB component
-        r = int(start_rgb[0] + (end_rgb[0] - start_rgb[0]) * t)
-        g = int(start_rgb[1] + (end_rgb[1] - start_rgb[1]) * t)
-        b = int(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * t)
-
-        return self.rgb_to_hex((r, g, b))
-
-    def hex_to_rgb(self, hex_color):
-        if hex_color.startswith('#'):
-            hex_color = hex_color[1:]
-        return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
-
-    def rgb_to_hex(self, rgb):
-        return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
-
-    def DarkenHex(self, hex_color, factor=0.5):
-
-        rgb = self.hex_to_rgb(hex_color)
-
-        # Darken each component
-        darkened_rgb = tuple(
-            max(0, min(255, int(component * factor)))
-            for component in rgb
-        )
-
-        return self.rgb_to_hex(darkened_rgb)
-
-    def OpenPreview(self):
-        self.preview_frame.place(x=0)
+    sys.exit(app.exec())
 
 
-    def ClosePreview(self):
-        time.sleep(2)
-        self.preview_frame.place(x=5000)
+if __name__ == "__main__":
+    main()

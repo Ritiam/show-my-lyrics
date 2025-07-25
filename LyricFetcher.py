@@ -5,11 +5,12 @@ import time
 import threading
 
 
+
 class LyricFetcher:
     def __init__(self, callback_function):
         self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-            client_id="SPOTIFY_CLIENT_ID",
-            client_secret="SPOTIFY_CLIENT_SECRET",
+            client_id="client_id",
+            client_secret="client_secret",
             redirect_uri="http://127.0.0.1:8888/callback",
             scope="user-read-currently-playing user-read-playback-state"
         ))
@@ -115,6 +116,8 @@ class LyricFetcher:
                         self.album_name = current_track["item"]["album"]["name"]
                         self.duration = current_track["item"]["duration_ms"] // 1000
                         self.last_id = track_id
+
+                        print(f"Playing {self.track_name} by {self.artist_name}")
 
                         try:
                             lyric_result = self.lrc_api.get_lyrics(

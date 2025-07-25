@@ -1,423 +1,1115 @@
-import tkinter
-from tkinter import colorchooser
-import customtkinter as ctk
-from PIL import Image
+import sys
+import threading
+
+from PyQt6.QtSvgWidgets import QSvgWidget
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, QFrame, QColorDialog, QPushButton, QComboBox, QSpinBox
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QSequentialAnimationGroup, pyqtProperty, QTimer, \
+    QByteArray
+from PyQt6.QtGui import QFont, QColor, QPainter, QTransform, QFontDatabase
+import queue
 from LyricDisplayer import DisplayWindow
 from LyricFetcher import LyricFetcher
-import threading
-import queue
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("dark-blue")
+class ThemeButton(QPushButton):
+    def __init__(self, theme_name, bg_color, top_color, highlight_color, parent=None):
+        super().__init__(parent)
+        self.theme_name = theme_name
+        self.bg_color = bg_color
+        self.top_color = top_color
+        self.highlight_color = highlight_color
+
+        # Set button size
+        self.setFixedSize(30, 60)
+        self.setup_style()
+
+    def setup_style(self, clicked=False):
+        if(not clicked):
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {self.bg_color};
+                    border: 3px solid {self.parent().main.menu_bg_color_top};
+                    border-radius: 8px;
+                }}
+            """)
+        else:
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {self.bg_color};
+                    border: 3px solid {self.parent().main.menu_highlight_color};
+                    border-radius: 8px;
+                }}
+            """)
 
 
-class App(ctk.CTk):
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        button_rect = self.rect()
+        width = int(button_rect.width()*0.8)
+        height = int(button_rect.height()*0.5)
+        x = (button_rect.width() - width) // 2
+        y = (button_rect.height()) // 2
+
+        painter.setBrush(QColor(self.top_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(x, y-10, width, height, 5, 5)
+
+        height = int(button_rect.height() * 0.4)
+        y = (button_rect.height() + width) // 2
+        painter.setBrush(QColor(self.highlight_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(x, y-6, width, height, 5, 5)
+
+
+        painter.end()
+
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title("Show My Lyrics")
-        self.geometry("600x800")
-        self.configure(fg_color="#444651")
-        self.resizable(False, False)
+        self.setWindowTitle("Show My Lyrics - PyQt6")
+        self.setFixedSize(600, 800)
 
-        # Customization Data
+        # Lyrics Data
         self.chosen_font = "Arial"
-        self.chosen_size = 25
-        self.chosen_color = "#c0c0c0"
-        self.chosen_opacity = 1.0
+        self.chosen_bold = False
+        self.chosen_italic = False
+        self.chosen_underline = False
+        self.chosen_size = 40
+        self.chosen_color = "#FFFFFF"
+        self.chosen_opacity = 80
         self.chosen_position = (2, 1)
-        self.chosen_alignment = "e"
+        self.chosen_alignment = 2
 
+
+        # Customization Menu Data
+        self.menu_bg_color_bottom = "#34282C"
+        self.menu_bg_color = "#EFE1E6"
+        self.menu_bg_color_top = "#9A6A79"
+        self.menu_text_color = "#5E404A"
+        self.menu_highlight_color = "#B296E3"
+
+        self.chosen_theme_ind = 0
+
+        # Set dark background color
+        self.setStyleSheet(f"background-color: {self.menu_bg_color_bottom};")
 
         # Create a queue for thread-safe communication
         self.lyrics_queue = queue.Queue()
 
-        # App Layout
-        self.Display = DisplaySection(self, self)
-        self.Display.pack(fill="x", pady=(39, 0))
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
 
-        self.Font = FontSection(self, self)
-        self.Font.pack(fill="x", pady=(35, 0))
+        # Create main layout with proper spacing
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(40, 40, 40, 40)
 
-        self.Size = SizeSection(self, self)
-        self.Size.pack(fill="x", pady=(35, 0))
+        # Create the 5 sections
+        self.display_section = DisplaySection(self)
+        self.font_section = FontSection(self)
+        self.color_section = ColorSection(self)
+        self.extra_section = ExtraSection(self)
+        self.theme_section = ThemeSection(self)
+        self.details = DetailSection(self)
 
-        self.Color = ColorSection(self, self)
-        self.Color.pack(fill="x", pady=(35, 0))
+        # Add sections to main layout
+        main_layout.addWidget(self.display_section)
+        main_layout.addWidget(self.font_section)
+        main_layout.addWidget(self.color_section)
+        main_layout.addWidget(self.extra_section)
+        main_layout.addWidget(self.theme_section)
 
-        self.Preview = PreviewSection(self, self)
-        self.Preview.pack(fill="x", pady=35)
+        self.display_window = DisplayWindow()
+        self.display_window.show()
 
-        # Display window
-        try:
-            self.display_window = DisplayWindow(
-                font=self.chosen_font,
-                size=self.chosen_size,
-                color=self.chosen_color,
-                opacity=self.chosen_opacity,
-                position=self.chosen_position
-            )
-            self.display_window.deiconify()
-            print(f"Display window created at position {self.chosen_position}")
-        except Exception as e:
-            print(f"Error creating display window: {e}")
+        self.lyrics_queue = queue.Queue()
 
-        # Start window checker
-        self.window_state = 1
-        self.CheckWindowState()
-
-        # Start the lyric fetcher
-        self.lyric_fetcher = LyricFetcher(self.on_lyrics_change)
+        self.lyric_fetcher = LyricFetcher(self.OnLyricsChange)
         self.fetcher_thread = threading.Thread(target=self.lyric_fetcher.Run, daemon=True)
         self.fetcher_thread.start()
 
         # Start processing the queue
-        self.process_lyrics_queue()
+        self.ProcessLyricsQueue()
 
-        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+    def ChangeMenuTheme(self, color):
+        if color == "red":
+            self.menu_bg_color_bottom = "#34282C"
+            self.menu_bg_color = "#EFE1E6"
+            self.menu_bg_color_top = "#9A6A79"
+            self.menu_text_color = "#5E404A"
+            self.menu_highlight_color = "#B296E3"
 
-    # Functions
-    def on_closing(self):
-        if hasattr(self, 'lyric_fetcher'):
-            self.lyric_fetcher.Stop()
-        if hasattr(self, 'display_window'):
-            self.display_window.destroy()
-        self.destroy()
+        elif color == "orange":
+            self.menu_bg_color_bottom = "#4B392A"
+            self.menu_bg_color = "#F0E7E0"
+            self.menu_bg_color_top = "#9F8065"
+            self.menu_text_color = "#614D3D"
+            self.menu_highlight_color = "#E088A4"
 
-    def on_lyrics_change(self, lyrics_data):
-        # Put the lyrics data in the queue instead of updating directly
-        self.lyrics_queue.put(lyrics_data)
+        elif color == "green":
+            self.menu_bg_color_bottom = "#353928"
+            self.menu_bg_color = "#E4E4E2"
+            self.menu_bg_color_top = "#808377"
+            self.menu_text_color = "#4C4E46"
+            self.menu_highlight_color = "#DA955B"
 
-    def process_lyrics_queue(self):
-        # Process any pending lyrics updates from the queue
-        try:
-            while not self.lyrics_queue.empty():
-                lyrics_data = self.lyrics_queue.get_nowait()
-                if hasattr(self, 'display_window') and lyrics_data:
-                    # Update the display window with new lyrics
-                    self.display_window.UpdateLyrics(lyrics_data)
-        except queue.Empty:
-            pass
+        elif color == "turquoise":
+            self.menu_bg_color_bottom = "#223F3A"
+            self.menu_bg_color = "#E1EAE9"
+            self.menu_bg_color_top = "#748B87"
+            self.menu_text_color = "#465351"
+            self.menu_highlight_color = "#9EB15D"
 
-        # Schedule the next check
-        self.after(50, self.process_lyrics_queue)
+        elif color == "blue":
+            self.menu_bg_color_bottom = "#2F4351"
+            self.menu_bg_color = "#E9F1F6"
+            self.menu_bg_color_top = "#6392B0"
+            self.menu_text_color = "#3A5D73"
+            self.menu_highlight_color = "#42BEA9"
 
+        elif color == "purple":
+            self.menu_bg_color_bottom = "#4B4653"
+            self.menu_bg_color = "#EEEAF6"
+            self.menu_bg_color_top = "#8169AB"
+            self.menu_text_color = "#503E6F"
+            self.menu_highlight_color = "#5FB0E6"
 
-    def CheckWindowState(self):
-        is_viewable = self.winfo_viewable()
-
-        if is_viewable == 0 and self.window_state != 0:
-            self.display_window.ClosePreview()
-            self.window_state = 0
-
-        elif is_viewable == 1 and self.window_state != 1:
-            self.display_window.OpenPreview()
-            self.window_state = 1
+        self.ApplyMenuTheme()
 
 
-        self.after(1000, self.CheckWindowState)
+    def ApplyMenuTheme(self):
+        self.setStyleSheet(f"background-color: {self.menu_bg_color_bottom};")
 
-    def UpdatePreview(self):
+        self.display_section.ChangeTheme()
+        self.font_section.ChangeTheme()
+        self.color_section.ChangeTheme()
+        self.extra_section.ChangeTheme()
+        self.theme_section.ChangeTheme()
+        self.details.ChangeTheme()
 
-        # Update the display window with new settings
-        if hasattr(self, 'display_window'):
-            self.display_window.UpdateSettings(
+
+    def UpdateDisplaySettings(self):
+        if hasattr(self, "display_window"):
+            self.display_window.UpdateCustomization(
                 font=self.chosen_font,
                 size=self.chosen_size,
                 color=self.chosen_color,
                 opacity=self.chosen_opacity,
                 position=self.chosen_position,
-                alignment=self.chosen_alignment
+                alignment=self.chosen_alignment,
+                bold=self.chosen_bold,
+                italic=self.chosen_italic,
+                underline=self.chosen_underline
             )
 
-
-class DisplaySection(ctk.CTkFrame):
-    def __init__(self, master, app_ref):
-        super().__init__(master, width=520, height=225, fg_color="#444651")
-        self.pack_propagate(False)
-        self.app = app_ref
-
-        # Background image
-        self.bg_image = ctk.CTkImage(Image.open("images/Position.png"), size=(520, 225))
-        self.image_label = ctk.CTkLabel(self, image=self.bg_image, text="")
-        self.image_label.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        # Title
-        self.title = ctk.CTkLabel(self, text="DISPLAY", font=("Arial", 25, "bold"), text_color="#D886D2")
-        self.title.place(x=40, y=10)
-
-        # Description
-        self.description = ctk.CTkLabel(self, text="Lyrics\nposition\nand their\nalignment:", font=("Arial", 20, "bold"),
-                                        text_color="#AF4FA9", fg_color="#D886D2")
-        self.description.place(x=60, y=70)
-
-        # Position Selection
-        self.pos_button_frame = ctk.CTkFrame(self, fg_color="#D886D2")
-        self.pos_button_frame.place(relx=0.6, rely=0.5, anchor="center")
-
-        btn_tl = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((0, 0)), width=100, height=60,
-                               text="Top Left", font=("Arial", 15, "bold"), text_color="#D886D2", fg_color="#AF4FA9",
-                               hover_color="#832F7E")
-        btn_tl.grid(row=0, column=0, padx=5, pady=5)
-
-        btn_tc = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((1, 0)), width=100, height=60,
-                               text="Top\nCenter", font=("Arial", 15, "bold"), text_color="#D886D2", fg_color="#AF4FA9",
-                               hover_color="#832F7E")
-        btn_tc.grid(row=0, column=1, padx=5, pady=5)
-
-        btn_tr = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((2, 0)), width=100, height=60,
-                               text="Top\nRight", font=("Arial", 15, "bold"), text_color="#D886D2", fg_color="#AF4FA9",
-                               hover_color="#832F7E")
-        btn_tr.grid(row=0, column=2, padx=5, pady=5)
-
-        btn_ml = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((0, 1)), width=100, height=60,
-                               text="Middle\nLeft", font=("Arial", 15, "bold"), text_color="#D886D2",
-                               fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_ml.grid(row=1, column=0, padx=5, pady=5)
-
-        btn_mc = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((1, 1)), width=100, height=60,
-                               text="Middle\nCenter", font=("Arial", 15, "bold"), text_color="#D886D2",
-                               fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_mc.grid(row=1, column=1, padx=5, pady=5)
-
-        btn_mr = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((2, 1)), width=100, height=60,
-                               text="Middle\nRight", font=("Arial", 15, "bold"), text_color="#D886D2",
-                               fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_mr.grid(row=1, column=2, padx=5, pady=5)
-
-        btn_bl = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((0, 2)), width=100, height=60,
-                               text="Bottom\nLeft", font=("Arial", 15, "bold"), text_color="#D886D2",
-                               fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_bl.grid(row=2, column=0, padx=5, pady=5)
-
-        btn_bc = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((1, 2)), width=100, height=60,
-                               text="Bottom\nCenter", font=("Arial", 15, "bold"), text_color="#D886D2",
-                               fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_bc.grid(row=2, column=1, padx=5, pady=5)
-
-        btn_br = ctk.CTkButton(self.pos_button_frame, command=lambda: self.UpdatePosition((2, 2)), width=100, height=60,
-                               text="Bottom\nRight", font=("Arial", 15, "bold"), text_color="#D886D2",
-                               fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_br.grid(row=2, column=2, padx=5, pady=5)
-
-        self.pos_buttons = [btn_tl, btn_tc, btn_tr, btn_ml, btn_mc, btn_mr, btn_bl, btn_bc, btn_br]
-
-        self.pos_buttons[5].configure(fg_color="#832F7E") # Default
-
-
-        # Alignment Selection
-        self.al_button_frame = ctk.CTkFrame(self, fg_color="#D886D2")
-        self.al_button_frame.place(relx=0.18, rely=0.895, anchor="center")
-
-        btn_west = ctk.CTkButton(self.al_button_frame, command=lambda: self.UpdateAlignment(0), width=30, height=20,
-                                 text="<", font=("Arial", 15, "bold"), text_color="#D886D2",
-                                 fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_west.grid(row=0, column=0, padx=5, pady=5)
-
-        btn_center = ctk.CTkButton(self.al_button_frame, command=lambda: self.UpdateAlignment(1), width=30, height=20,
-                                 text="|", font=("Arial", 15, "bold"), text_color="#D886D2",
-                                 fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_center.grid(row=0, column=1, padx=5, pady=5)
-
-        btn_east = ctk.CTkButton(self.al_button_frame, command=lambda: self.UpdateAlignment(2), width=30, height=20,
-                                 text=">", font=("Arial", 15, "bold"), text_color="#D886D2",
-                                 fg_color="#AF4FA9", hover_color="#832F7E")
-        btn_east.grid(row=0, column=2, padx=5, pady=5)
-
-        self.al_buttons = [btn_west, btn_center, btn_east]
-
-        self.al_buttons[2].configure(fg_color="#832F7E") # Default
-
-
-
-    def UpdatePosition(self, ind):
-        self.pos_buttons[self.app.chosen_position[0] + self.app.chosen_position[1] * 3].configure(fg_color="#AF4FA9")
-        self.pos_buttons[ind[0] + ind[1] * 3].configure(fg_color="#832F7E")
-        self.app.chosen_position = ind
-        self.app.UpdatePreview()
-
-    def UpdateAlignment(self, ind):
-        if(self.app.chosen_alignment == "w"): old_ind = 0
-        elif(self.app.chosen_alignment == "center"): old_ind = 1
-        else: old_ind = 2
-
-        self.al_buttons[old_ind].configure(fg_color="#AF4FA9")
-        self.al_buttons[ind].configure(fg_color="#832F7E")
-
-        if(ind == 0): self.app.chosen_alignment = "w"
-        if(ind == 1): self.app.chosen_alignment = "center"
-        if(ind == 2): self.app.chosen_alignment = "e"
-
-        self.app.UpdatePreview()
-
-
-class FontSection(ctk.CTkFrame):
-    def __init__(self, master, app_ref):
-        super().__init__(master, width=520, height=80, fg_color="#444651")
-        self.pack_propagate(False)
-        self.app = app_ref
-
-        # Background image
-        self.bg_image = ctk.CTkImage(Image.open("images/Font.png"), size=(520, 80))
-        self.image_label = ctk.CTkLabel(self, image=self.bg_image, text="")
-        self.image_label.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        # Title
-        self.title = ctk.CTkLabel(self, text="FONT", font=("Arial", 20, "bold"), text_color="#D886D2")
-        self.title.place(x=40, y=5)
-
-        # Description
-        self.description = ctk.CTkLabel(self, text="Font of the\nlyrics:", font=("Arial", 20, "bold"),
-                                        text_color="#AF4FA9", fg_color="#D886D2")
-        self.description.place(x=120, y=15)
-
-        # Font Selection
-        font_choices = ["Arial", "Times New Roman", "Courier New", "Comic Sans MS", "Verdana"]
-        self.font_dropdown = ctk.CTkOptionMenu(
-            self,
-            values=font_choices,
-            command=self.FontSelected,
-            width=180,
-            height=30,
-            font=("Arial", 14),
-            fg_color="#AF4FA9",
-            bg_color="#D886D2",
-            button_color="#832F7E",
-            button_hover_color="#6b2563",
-            text_color="#D886D2"
-        )
-        self.font_dropdown.set("Arial")  # default selection
-        self.font_dropdown.place(x=300, y=25)
-
-    def FontSelected(self, choice):
-        print(f"Selected font: {choice}")
-        self.app.chosen_font = choice
-        self.app.UpdatePreview()
-
-
-class SizeSection(ctk.CTkFrame):
-    def __init__(self, master, app_ref):
-        super().__init__(master, width=520, height=80, fg_color="#444651")
-        self.pack_propagate(False)
-        self.app = app_ref
-
-        # Background image
-        self.bg_image = ctk.CTkImage(Image.open("images/Size.png"), size=(520, 80))
-        self.image_label = ctk.CTkLabel(self, image=self.bg_image, text="")
-        self.image_label.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        # Title
-        self.title = ctk.CTkLabel(self, text="SIZE", font=("Arial", 23, "bold"), text_color="#D886D2")
-        self.title.place(x=40, y=5)
-
-        # Description
-        self.description = ctk.CTkLabel(self, text="Size of the\nlyrics:", font=("Arial", 20, "bold"),
-                                        text_color="#AF4FA9", fg_color="#D886D2")
-        self.description.place(x=110, y=15)
-
-        # Size selection
-        size_choices = ["14", "17", "20", "25", "30", "36", "48", "60"]
-        self.size_dropdown = ctk.CTkOptionMenu(
-            self,
-            values=size_choices,
-            command=self.SizeSelected,
-            width=180,
-            height=30,
-            font=("Arial", 14),
-            fg_color="#AF4FA9",
-            bg_color="#D886D2",
-            button_color="#832F7E",
-            button_hover_color="#6b2563",
-            text_color="#D886D2"
-        )
-        self.size_dropdown.set("25")  # default selection
-        self.size_dropdown.place(x=300, y=25)
-
-    def SizeSelected(self, choice):
-        print(f"Selected size: {choice}")
-        self.app.chosen_size = int(choice)
-        self.app.UpdatePreview()
-
-
-class ColorSection(ctk.CTkFrame):
-    def __init__(self, master, app_ref):
-        super().__init__(master, width=520, height=80, fg_color="#444651")
-        self.pack_propagate(False)
-        self.app = app_ref
-
-        # Background image
-        self.bg_image = ctk.CTkImage(Image.open("images/Color.png"), size=(520, 80))
-        self.image_label = ctk.CTkLabel(self, image=self.bg_image, text="")
-        self.image_label.place(relx=0, rely=0, relwidth=1, relheight=1)
-
-        # Title
-        self.title = ctk.CTkLabel(self, text="COLOR", font=("Arial", 20, "bold"), text_color="#D886D2")
-        self.title.place(x=40, y=5)
-
-        # Description
-        self.description = ctk.CTkLabel(self, text="Color and opacity\nof the lyrics:", font=("Arial", 20, "bold"),
-                                        text_color="#AF4FA9", fg_color="#D886D2")
-        self.description.place(x=140, y=15)
-
-        # Color Selection
-        self.color_button = ctk.CTkButton(
-            self,
-            text="Pick Color",
-            width=100,
-            height=30,
-            font=("Arial", 14),
-            text_color="#D886D2",
-            fg_color="#AF4FA9",
-            bg_color="#D886D2",
-            hover_color="#832F7E",
-            command=self.ColorPicker
-        )
-        self.color_button.place(x=340, y=25)
-
-        # Opacity Selection
-        self.opacity_entry = ctk.CTkEntry(self, width=50, font=("Arial", 14), text_color="#D886D2", fg_color="#AF4FA9",
-                                          bg_color="#D886D2", border_color="#AF4FA9")
-        self.opacity_entry.place(x=450, y=26)
-        self.opacity_entry.insert(0, "100")
-        self.opacity_entry.bind("<KeyRelease>", self.OpacitySelected)
-
-    def ColorPicker(self):
-        color_code = tkinter.colorchooser.askcolor(title="Choose Color")[1]
-        if color_code:
-            print(f"Selected color: {color_code}")
-            self.app.chosen_color = color_code
-            self.app.UpdatePreview()
-
-    def OpacitySelected(self, event=None):
-        val = self.opacity_entry.get()
+    def ProcessLyricsQueue(self):
         try:
-            opacity = max(0, min(100, int(val)))
-            self.app.chosen_opacity = opacity / 100.0
-            self.app.UpdatePreview()
-        except ValueError:
+            while not self.lyrics_queue.empty():
+                lyrics_data = self.lyrics_queue.get_nowait()
+                self.display_window.UpdateLyrics(lyrics_data)
+
+        except queue.Empty:
             pass
 
+        QTimer.singleShot(250, self.ProcessLyricsQueue)
 
-class PreviewSection(ctk.CTkFrame):
-    def __init__(self, master, app_ref):
-        super().__init__(master, width=520, height=120, fg_color="#444651")
-        self.pack_propagate(False)
-        self.app = app_ref
+    def OnLyricsChange(self, lyrics_data):
+        self.lyrics_queue.put(lyrics_data)
 
-        # Background image
-        self.bg_image = ctk.CTkImage(Image.open("images/Preview.png"), size=(520, 120))
-        self.image_label = ctk.CTkLabel(self, image=self.bg_image, text="")
-        self.image_label.place(relx=0, rely=0, relwidth=1, relheight=1)
+    def closeEvent(self, event):
+        if hasattr(self, 'lyric_fetcher'):
+            self.lyric_fetcher.Stop()
+        if hasattr(self, 'display_window'):
+            self.display_window.close()
+        event.accept()
+
+
+class DisplaySection(QFrame):
+    def __init__(self, main):
+        super().__init__()
+        self.setFixedSize(520, 225)
+        self.main = main
+
+        # Background
+        self.bottom_bg_rect = QFrame(self)
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.bottom_bg_rect.setGeometry(0, 0, 520, 225)
 
         # Title
-        self.title = ctk.CTkLabel(self, text="PREVIEW", font=("Arial", 23, "bold"), text_color="#D886D2")
-        self.title.place(x=40, y=5)
+        self.title_shadow = QLabel("DISPLAY", self)
+        self.title_shadow.setFont(QFont("Arial", 25, QFont.Weight.Bold))
+        self.title_shadow.setStyleSheet(f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title_shadow.setGeometry(0, 0, 150, 40)
 
-        # Preview Lyrics
-        self.preview_lyric = ctk.CTkLabel(self, text="Minimize this window to get your lyrics",
-                                          font=("Arial", 25, "bold"),
-                                          text_color="#AF4FA9", fg_color="#D886D2", wraplength=540)
-        self.preview_lyric.place(relx=0.5, rely=0.6, anchor="center")
+        self.title = QLabel("DISPLAY", self)
+        self.title.setFont(QFont("Arial", 25, QFont.Weight.Bold))
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.title.setGeometry(0, -4, 150, 40)
+
+        # Description
+        self.description = QLabel("Position of lyrics and their alignment:", self)
+        self.description.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.description.setStyleSheet(f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+        self.description.setGeometry(150, 0, 370, 45)
+
+        # Position Buttons
+        self.pos_btn_tl = QPushButton("Top\nLeft", self)
+        self.pos_btn_tc = QPushButton("Top\nCenter", self)
+        self.pos_btn_tr = QPushButton("Top\nRight", self)
+        self.pos_btn_ml = QPushButton("Middle\nLeft", self)
+        self.pos_btn_mc = QPushButton("Middle\nCenter", self)
+        self.pos_btn_mr = QPushButton("Middle\nRight", self)
+        self.pos_btn_bl = QPushButton("Bottom\nLeft", self)
+        self.pos_btn_bc = QPushButton("Bottom\nCenter", self)
+        self.pos_btn_br = QPushButton("Bottom\nRight", self)
+
+        self.pos_buttons = [self.pos_btn_tl, self.pos_btn_tc, self.pos_btn_tr, self.pos_btn_ml, self.pos_btn_mc, self.pos_btn_mr, self.pos_btn_bl,
+                            self.pos_btn_bc, self.pos_btn_br]
+
+
+        for ind, pos_btn in enumerate(self.pos_buttons):
+            pos_btn.setStyleSheet(f"""
+                                        QPushButton {{
+                                            background-color: {self.main.menu_bg_color_top};
+                                            color: {self.main.menu_text_color};
+                                            border: none;
+                                            border-radius: 5;
+                                            font: bold 14px Arial;
+                                        }}
+                                        QPushButton:hover {{                                                       
+                                            background-color: {self.main.menu_highlight_color};
+                                            color: {self.main.menu_bg_color};
+                                        }}
+                                    """)
+
+            row = ind // 3
+            col = ind % 3
+
+            pos_btn.setGeometry(230 + col * 75, 75 + row * 45, 70, 40)
+            pos_btn.clicked.connect(lambda checked, idx=ind: self.PosButtonPressed(idx))
+
+        self.pos_buttons[5].setStyleSheet(f"background-color: {self.main.menu_highlight_color};color: {self.main.menu_bg_color};border: none; border-radius: 5; font: bold 14px Arial;")
+
+
+
+        # Alignment Buttons
+        self.w_shadow = QFrame(self)
+        self.c_shadow = QFrame(self)
+        self.e_shadow = QFrame(self)
+
+        self.w_shadow.setGeometry(40, 125, 35, 40)
+        self.c_shadow.setGeometry(80, 125, 35, 40)
+        self.e_shadow.setGeometry(120, 125, 35, 40)
+
+        self.w_shadow.setStyleSheet(f"background-color: {self.main.menu_highlight_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;")
+        self.c_shadow.setStyleSheet(f"background-color: {self.main.menu_highlight_color};border: none; border-radius: 0px;font: bold 14px Arial;")
+        self.e_shadow.setStyleSheet(f"background-color: {self.main.menu_highlight_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: bold 14px Arial;")
+
+
+
+        self.al_button_w = QPushButton("<", self)
+        self.al_button_c = QPushButton("|", self)
+        self.al_button_e = QPushButton(">", self)
+
+        self.al_button_w.setGeometry(40, 120, 35, 40)
+        self.al_button_c.setGeometry(80, 120, 35, 40)
+        self.al_button_e.setGeometry(120, 122, 35, 40)
+
+        self.al_button_w.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;}}""")
+        self.al_button_c.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-radius: 0px;font: bold 14px Arial;}}""")
+        self.al_button_e.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_highlight_color};color: {self.main.menu_text_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: bold 14px Arial;}}""")
+
+        self.al_buttons = [self.al_button_w, self.al_button_c, self.al_button_e]
+
+
+
+        for ind, al_btn in enumerate(self.al_buttons):
+            al_btn.clicked.connect(lambda checked, idx=ind: self.AlButtonPressed(idx))
+
+
+
+    def PosButtonPressed(self, ind):
+        old_ind = self.main.chosen_position[0] + 3*self.main.chosen_position[1]
+        self.pos_buttons[old_ind].setStyleSheet(f"""
+                                QPushButton {{
+                                    background-color: {self.main.menu_bg_color_top};
+                                    color: {self.main.menu_text_color};
+                                    border: none;
+                                    border-radius: 5;
+                                    font: bold 14px Arial;
+                                }}
+                                QPushButton:hover {{
+                                    color: {self.main.menu_bg_color};
+                                    background-color: {self.main.menu_highlight_color};
+                                }}
+                            """)
+        self.pos_buttons[ind].setStyleSheet(f"""
+                                QPushButton {{
+                                    background-color: {self.main.menu_highlight_color};
+                                    color: {self.main.menu_bg_color};
+                                    border: none;
+                                    border-radius: 5;
+                                    font: bold 14px Arial;
+                                }}
+                            """)
+
+        self.main.chosen_position = (ind % 3, ind // 3)
+        self.main.UpdateDisplaySettings()
+
+
+    def AlButtonPressed(self, ind):
+        if(ind == self.main.chosen_alignment): return
+
+        old_ind = self.main.chosen_alignment
+        old_btn = self.al_buttons[old_ind]
+        new_btn = self.al_buttons[ind]
+
+        self.up_anim = QPropertyAnimation(old_btn,b"pos")
+        self.up_anim.setStartValue(old_btn.pos())
+        self.up_anim.setEndValue(old_btn.pos() + QPoint(0, -2))
+        self.up_anim.setDuration(200)
+        self.up_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+
+        self.down_anim = QPropertyAnimation(new_btn, b"pos")
+        self.down_anim.setStartValue(new_btn.pos())
+        self.down_anim.setEndValue(new_btn.pos() + QPoint(0, 2))
+        self.down_anim.setDuration(200)
+        self.down_anim.setEasingCurve(QEasingCurve.Type.InQuad)
+
+        self.up_anim.start()
+        self.down_anim.start()
+
+        def ChangeAlButtonStyle(ind, is_new):
+            if(is_new):
+                if(ind == 0):
+                    self.al_buttons[ind].setStyleSheet(f" border-top-left-radius: 5px; border-bottom-left-radius: 5px; background-color: {self.main.menu_highlight_color}; color: {self.main.menu_bg_color}; border: none; font: bold 14px Arial;")
+                if (ind == 1):
+                    self.al_buttons[ind].setStyleSheet(f"border-radius: 0px; background-color: {self.main.menu_highlight_color}; color: {self.main.menu_bg_color}; border: none; font: bold 14px Arial;")
+                if (ind == 2):
+                    self.al_buttons[ind].setStyleSheet(f" border-top-right-radius: 5px; border-bottom-right-radius: 5px; background-color: {self.main.menu_highlight_color}; color: {self.main.menu_bg_color}; border: none; font: bold 14px Arial;")
+
+            else:
+                if (ind == 0):
+                    self.al_buttons[ind].setStyleSheet(f" border-top-left-radius: 5px; border-bottom-left-radius: 5px; background-color: {self.main.menu_bg_color_top}; color: {self.main.menu_text_color}; border: none; font: bold 14px Arial;")
+                if (ind == 1):
+                    self.al_buttons[ind].setStyleSheet(f"border-radius: 0px; background-color: {self.main.menu_bg_color_top}; color: {self.main.menu_text_color}; border: none; font: bold 14px Arial;")
+                if (ind == 2):
+                    self.al_buttons[ind].setStyleSheet(f" border-top-right-radius: 5px; border-bottom-right-radius: 5px; background-color: {self.main.menu_bg_color_top}; color: {self.main.menu_text_color}; border: none; font: bold 14px Arial;")
+
+
+        ChangeAlButtonStyle(old_ind, False)
+        ChangeAlButtonStyle(ind, True)
+
+        self.main.chosen_alignment = ind
+        self.main.UpdateDisplaySettings()
+
+
+    def ChangeTheme(self):
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.title_shadow.setStyleSheet(
+            f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.description.setStyleSheet(
+            f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+
+        for ind, pos_btn in enumerate(self.pos_buttons):
+            pos_btn.setStyleSheet(f"""
+                                        QPushButton {{
+                                            background-color: {self.main.menu_bg_color_top};
+                                            color: {self.main.menu_text_color};
+                                            border: none;
+                                            border-radius: 5;
+                                            font: bold 14px Arial;
+                                        }}
+                                        QPushButton:hover {{                                                       
+                                            background-color: {self.main.menu_highlight_color};
+                                            color: {self.main.menu_bg_color};
+                                        }}
+                                    """)
+
+        self.pos_buttons[self.main.chosen_position[0] + self.main.chosen_position[1]*3].setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color};color: {self.main.menu_bg_color};border: none; border-radius: 5; font: bold 14px Arial;")
+        self.w_shadow.setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;")
+        self.c_shadow.setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color};border: none; border-radius: 0px;font: bold 14px Arial;")
+        self.e_shadow.setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: bold 14px Arial;")
+
+        self.al_button_w.setStyleSheet(
+            f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;}}""")
+        self.al_button_c.setStyleSheet(
+            f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-radius: 0px;font: bold 14px Arial;}}""")
+        self.al_button_e.setStyleSheet(
+            f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: bold 14px Arial;}}""")
+
+        if(self.main.chosen_alignment == 0): self.al_buttons[0].setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_highlight_color};color: {self.main.menu_bg_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;}}""")
+        if(self.main.chosen_alignment == 1): self.al_buttons[1].setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_highlight_color};color: {self.main.menu_bg_color};border: none; border-radius: 0px; font: bold 14px Arial;}}""")
+        if(self.main.chosen_alignment == 2): self.al_buttons[2].setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_highlight_color};color: {self.main.menu_bg_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: bold 14px Arial;}}""")
+class FontSection(QFrame):
+    def __init__(self, main):
+        super().__init__()
+        self.setFixedSize(520, 80)
+        self.main = main
+
+        # Background
+        self.bottom_bg_rect = QFrame(self)
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.bottom_bg_rect.setGeometry(0, 0, 520, 80)
+
+
+
+        # Title
+        self.title_shadow = QLabel("FONT", self)
+        self.title_shadow.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        self.title_shadow.setStyleSheet(f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title_shadow.setGeometry(0, 0, 80, 32)
+
+        self.title = QLabel("FONT", self)
+        self.title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.title.setGeometry(0, -4, 80, 32)
+
+        # Description
+        self.description = QLabel("Font of the lyrics:", self)
+        self.description.setFont(QFont("Arial", 15, QFont.Weight.Bold))
+        self.description.setStyleSheet(f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+        self.description.setGeometry(85, 0, 440, 40)
+
+        # Font dropdown
+        self.font_shadow = QPushButton("", self)
+        self.font_shadow.setStyleSheet(f"background-color: {self.main.menu_highlight_color}; border-radius: 5px; padding: 10px;")
+        self.font_shadow.setGeometry(102, 53, 100, 20)
+
+        self.font_button = QComboBox(self)
+        self.font_button.setGeometry(102, 48, 100, 20)
+
+        common_fonts = [
+            "Arial",
+            "Times New Roman",
+            "Helvetica",
+            "Calibri",
+            "Georgia",
+            "Verdana",
+            "Comic Sans MS",
+            "Trebuchet MS",
+            "Courier New",
+            "Impact"
+        ]
+        self.font_button.addItems(common_fonts)
+
+        current_index = self.font_button.findText(self.main.chosen_font)
+        if current_index >= 0:
+            self.font_button.setCurrentIndex(current_index)
+
+        self.font_button.setStyleSheet(f"""
+                    QComboBox {{
+                        background-color: {self.main.menu_bg_color_top};
+                        color: {self.main.menu_text_color};
+                        border: none;
+                        border-radius: 5px;
+                        padding: 2px 5px;
+                        font: bold 12px Arial;
+                        text-align: center;
+                        qproperty-alignment: AlignCenter;
+                    }}
+                    QComboBox:hover {{
+                        background-color: {self.main.menu_highlight_color};
+                        color: {self.main.menu_bg_color};
+                    }}
+                    QComboBox::drop-down {{
+                        border: none;
+                        width: 20px;
+                    }}
+                    QComboBox QAbstractItemView {{
+                        background-color: {self.main.menu_bg_color_top};
+                        color: {self.main.menu_bg_color};
+                        selection-color: {self.main.menu_bg_color};
+                        border: 3px solid {self.main.menu_highlight_color};
+                    }}
+                    QScrollBar:vertical {{
+                    border: none;
+                    background: {self.main.menu_highlight_color};  
+                    width: 10px;
+                    margin: 0px 0px 0px 0px;
+                    }}
+                """)
+
+        self.font_button.currentTextChanged.connect(self.FontChanged)
+
+        # Font specials
+        self.bold_shadow = QFrame(self)
+        self.italic_shadow = QFrame(self)
+        self.underline_shadow = QFrame(self)
+
+        self.bold_shadow.setGeometry(245, 55, 25, 20)
+        self.italic_shadow.setGeometry(275, 55, 25, 20)
+        self.underline_shadow.setGeometry(305, 55, 25, 20)
+
+        self.bold_shadow.setStyleSheet(f"background-color: {self.main.menu_highlight_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;")
+        self.italic_shadow.setStyleSheet(f"background-color: {self.main.menu_highlight_color};border: none; border-radius: 0px;font: bold 14px Arial;")
+        self.underline_shadow.setStyleSheet(f"background-color: {self.main.menu_highlight_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: bold 14px Arial;")
+
+        self.bold_button = QPushButton("B", self)
+        self.italic_button = QPushButton("I", self)
+        self.underline_button = QPushButton("U", self)
+
+        self.bold_button.setGeometry(245, 50, 25, 20)
+        self.italic_button.setGeometry(275, 50, 25, 20)
+        self.underline_button.setGeometry(305, 50, 25, 20)
+
+        self.bold_button.setStyleSheet(
+            f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;}}""")
+        self.italic_button.setStyleSheet(
+            f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-radius: 0px;font: italic 14px Arial;}}""")
+        self.underline_button.setStyleSheet(
+            f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: 14px Arial; text-decoration: underline}}""")
+
+        self.special_buttons = [self.bold_button, self.italic_button, self.underline_button]
+
+        for ind, special_btn in enumerate(self.special_buttons):
+            special_btn.clicked.connect(lambda checked, idx=ind: self.SpecialButtonPressed(idx))
+
+
+        # Font size
+        self.size_button = QSpinBox(self)
+        self.size_button.setGeometry(375, 52, 35, 25)
+        self.size_label = QLabel("px", self)
+        self.size_label.setStyleSheet(f"background-color: none;font: bold 16px Arial; color: {self.main.menu_bg_color_top}")
+        self.size_label.setGeometry(414, 53, 20, 20)
+
+        self.size_button.setRange(8, 80)
+        self.size_button.setValue(int(self.main.chosen_size))
+        self.size_button.setStyleSheet(f"""
+                    QSpinBox {{
+                        background-color: transparent;
+                        color: {self.main.menu_text_color};
+                        border: 3px solid {self.main.menu_bg_color_top};
+                        border-radius: 5px;
+                        font: bold 12px Arial;
+                    }}
+                    QSpinBox:hover {{
+                        border: 3px solid {self.main.menu_highlight_color};
+                    }}
+                    QSpinBox::up-button, QSpinBox::down-button {{
+                    width: 0px;
+                    height: 0px;
+                    border: none;
+                    }}
+                """)
+        self.size_button.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.size_button.valueChanged.connect(self.SizeChanged)
+
+    def FontChanged(self, font_name):
+        self.main.chosen_font = font_name
+        self.main.UpdateDisplaySettings()
+
+    def SizeChanged(self, size_value):
+        self.main.chosen_size = float(size_value)
+        self.main.UpdateDisplaySettings()
+    def SpecialButtonPressed(self, ind):
+        if (ind == 0):
+            self.main.chosen_bold = not self.main.chosen_bold
+            new_state = self.main.chosen_bold
+
+        elif (ind == 1):
+            self.main.chosen_italic = not self.main.chosen_italic
+            new_state = self.main.chosen_italic
+
+        else:
+            self.main.chosen_underline = not self.main.chosen_underline
+            new_state = self.main.chosen_underline
+
+        btn = self.special_buttons[ind]
+
+        if(new_state == False):
+            self.move_anim = QPropertyAnimation(btn, b"pos")
+            self.move_anim.setStartValue(btn.pos())
+            self.move_anim.setEndValue(btn.pos() + QPoint(0, -2))
+            self.move_anim.setDuration(200)
+            self.move_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+        else:
+            self.move_anim = QPropertyAnimation(btn, b"pos")
+            self.move_anim.setStartValue(btn.pos())
+            self.move_anim.setEndValue(btn.pos() + QPoint(0, 2))
+            self.move_anim.setDuration(200)
+            self.move_anim.setEasingCurve(QEasingCurve.Type.InQuad)
+
+        self.move_anim.start()
+
+        def ChangeSpecialButtonStyle(ind, state):
+            if (state):
+                if (ind == 0):
+                    self.special_buttons[ind].setStyleSheet(
+                        f" border-top-left-radius: 5px; border-bottom-left-radius: 5px; background-color: {self.main.menu_highlight_color}; color: {self.main.menu_bg_color}; border: none; font: bold 14px Arial;")
+                if (ind == 1):
+                    self.special_buttons[ind].setStyleSheet(
+                        f"border-radius: 0px; background-color: {self.main.menu_highlight_color}; color: {self.main.menu_bg_color}; border: none; font: italic 14px Arial;")
+                if (ind == 2):
+                    self.special_buttons[ind].setStyleSheet(
+                        f" border-top-right-radius: 5px; border-bottom-right-radius: 5px; background-color: {self.main.menu_highlight_color}; color: {self.main.menu_bg_color}; border: none; font: 14px Arial; text-decoration: underline;")
+
+            else:
+                if (ind == 0):
+                    self.special_buttons[ind].setStyleSheet(
+                        f" border-top-left-radius: 5px; border-bottom-left-radius: 5px; background-color: {self.main.menu_bg_color_top}; color: {self.main.menu_text_color}; border: none; font: bold 14px Arial;")
+                if (ind == 1):
+                    self.special_buttons[ind].setStyleSheet(
+                        f"border-radius: 0px; background-color: {self.main.menu_bg_color_top}; color: {self.main.menu_text_color}; border: none; font: italic 14px Arial;")
+                if (ind == 2):
+                    self.special_buttons[ind].setStyleSheet(
+                        f" border-top-right-radius: 5px; border-bottom-right-radius: 5px; background-color: {self.main.menu_bg_color_top}; color: {self.main.menu_text_color}; border: none; font: bold 14px Arial; text-decoration: underline;")
+
+        ChangeSpecialButtonStyle(ind, new_state)
+
+        self.main.UpdateDisplaySettings()
+
+
+    def ChangeTheme(self):
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.title_shadow.setStyleSheet(
+            f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.description.setStyleSheet(
+            f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+        self.font_shadow.setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color}; border-radius: 5px; padding: 10px;")
+        self.font_button.setStyleSheet(f"""
+                            QComboBox {{
+                                background-color: {self.main.menu_bg_color_top};
+                                color: {self.main.menu_text_color};
+                                border: none;
+                                border-radius: 5px;
+                                padding: 2px 5px;
+                                font: bold 12px Arial;
+                                text-align: center;
+                                qproperty-alignment: AlignCenter;
+                            }}
+                            QComboBox:hover {{
+                                background-color: {self.main.menu_highlight_color};
+                                color: {self.main.menu_bg_color};
+                            }}
+                            QComboBox::drop-down {{
+                                border: none;
+                                width: 20px;
+                            }}
+                            QComboBox QAbstractItemView {{
+                                background-color: {self.main.menu_bg_color_top};
+                                color: {self.main.menu_bg_color};
+                                selection-color: {self.main.menu_bg_color};
+                                border: 3px solid {self.main.menu_highlight_color};
+                            }}
+                            QScrollBar:vertical {{
+                            border: none;
+                            background: {self.main.menu_highlight_color};  
+                            width: 10px;
+                            margin: 0px 0px 0px 0px;
+                            }}
+                        """)
+        self.bold_shadow.setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;")
+        self.italic_shadow.setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color};border: none; border-radius: 0px;font: bold 14px Arial;")
+        self.underline_shadow.setStyleSheet(
+            f"background-color: {self.main.menu_highlight_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: bold 14px Arial;")
+        if(self.main.chosen_bold): self.bold_button.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_highlight_color};color: {self.main.menu_text_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;}}""")
+        else: self.bold_button.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-top-left-radius: 5px; border-bottom-left-radius: 5px; font: bold 14px Arial;}}""")
+        if(self.main.chosen_italic): self.italic_button.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_highlight_color};color: {self.main.menu_text_color};border: none; border-radius: 0px;font: italic 14px Arial;}}""")
+        else : self.italic_button.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-radius: 0px;font: italic 14px Arial;}}""")
+        if(self.main.chosen_underline): self.underline_button.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_highlight_color};color: {self.main.menu_text_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: 14px Arial; text-decoration: underline}}""")
+        else: self.underline_button.setStyleSheet(f"""QPushButton {{background-color: {self.main.menu_bg_color_top};color: {self.main.menu_text_color};border: none; border-top-right-radius: 5px; border-bottom-right-radius: 5px; font: 14px Arial; text-decoration: underline}}""")
+        self.size_button.setStyleSheet(f"""
+                            QSpinBox {{
+                                background-color: transparent;
+                                color: {self.main.menu_text_color};
+                                border: 3px solid {self.main.menu_bg_color_top};
+                                border-radius: 5px;
+                                font: bold 12px Arial;
+                            }}
+                            QSpinBox:hover {{
+                                border: 3px solid {self.main.menu_highlight_color};
+                            }}
+                            QSpinBox::up-button, QSpinBox::down-button {{
+                            width: 0px;
+                            height: 0px;
+                            border: none;
+                            }}
+                        """)
+
+class ColorSection(QFrame):
+    def __init__(self, main):
+        super().__init__()
+        self.setFixedSize(520, 80)
+        self.main = main
+
+        # Background
+        self.bottom_bg_rect = QFrame(self)
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.bottom_bg_rect.setGeometry(0, 0, 520, 80)
+
+        # Title
+        self.title_shadow = QLabel("COLOR", self)
+        self.title_shadow.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        self.title_shadow.setStyleSheet(f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title_shadow.setGeometry(0, 0, 105, 32)
+
+        self.title = QLabel("COLOR", self)
+        self.title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.title.setGeometry(0, -4, 105, 32)
+
+        # Description
+        self.description = QLabel("Color and opacity of the lyrics:", self)
+        self.description.setFont(QFont("Arial", 15, QFont.Weight.Bold))
+        self.description.setStyleSheet(f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+        self.description.setGeometry(110, 0, 382, 40)
+
+        # Color Selection Button
+        self.color_button = QPushButton("Pick a Color", self)
+        self.color_button.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {self.main.menu_bg_color_top};
+                        color: {self.main.menu_text_color};
+                        border: none;
+                        border-top-left-radius: 5px; 
+                        border-bottom-left-radius: 5px;
+                        font: bold 12px Arial;
+                    }}
+                    QPushButton:hover {{
+                        color: {self.main.menu_bg_color};
+                        background-color: {self.main.menu_highlight_color};
+                    }}
+                """)
+        self.color_button.setGeometry(203, 42, 85, 25)
+        self.color_button.clicked.connect(self.OpenColorPicker)
+
+
+
+        # Color Preview Square
+        self.color_preview = QFrame(self)
+        self.color_preview.setStyleSheet(f"background-color: {self.main.chosen_color}; border: 2px solid {self.main.menu_bg_color_top};")
+        self.color_preview.setGeometry(146, 42, 27, 27)
+
+        # Opacity Selection
+        self.opacity_button = QSpinBox(self)
+        self.opacity_button.setGeometry(295, 42, 40, 25)
+        self.opacity_button.setRange(0, 100)
+        self.opacity_button.setValue(int(self.main.chosen_opacity))
+        self.opacity_button.setStyleSheet(f"""
+                            QSpinBox {{
+                                background-color: transparent;
+                                color: {self.main.menu_text_color};
+                                border: 3px solid {self.main.menu_bg_color_top};
+                                border-top-right-radius: 5px;
+                                border-bottom-right-radius: 5px;
+                                font: bold 12px Arial;
+                            }}
+                            QSpinBox:hover {{
+                                border: 3px solid {self.main.menu_highlight_color};
+                            }}
+                            QSpinBox::up-button, QSpinBox::down-button {{
+                            width: 0px;
+                            height: 0px;
+                            border: none;
+                            }}
+                        """)
+        self.opacity_button.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.opacity_button.valueChanged.connect(self.AlphaChanged)
+
+
+    def AlphaChanged(self, alpha_value):
+        self.main.chosen_opacity = float(alpha_value)
+        self.main.UpdateDisplaySettings()
+
+    def OpenColorPicker(self):
+        dialog = QColorDialog(self)
+        dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
+
+        # Apply your custom stylesheet here
+        dialog.setStyleSheet(f"""
+                /* Customize the Qt color dialog here */
+                QWidget {{
+                    background-color: {self.main.menu_bg_color};
+                    color: {self.main.menu_text_color};
+                    font: bold 14px Arial;
+                }}
+                QPushButton {{
+                    background-color: {self.main.menu_bg_color_top};
+                    border-radius: 5px;
+                    padding: 5px;
+                }}
+                QPushButton:hover {{
+                    background-color: {self.main.menu_highlight_color};
+                    color: {self.main.menu_bg_color};
+                }}
+                /* Add more styles for sliders, labels, etc. */
+            """)
+
+        if dialog.exec():
+            color = dialog.selectedColor()
+            if color.isValid():
+                self.main.chosen_color = color.name()
+                self.color_preview.setStyleSheet(
+                    f"background-color: {color.name()}; border: 2px solid {self.main.menu_bg_color_top};")
+
+        self.main.UpdateDisplaySettings()
+
+
+    def ChangeTheme(self):
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.title_shadow.setStyleSheet(
+            f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.color_button.setStyleSheet(f"""
+                            QPushButton {{
+                                background-color: {self.main.menu_bg_color_top};
+                                color: {self.main.menu_text_color};
+                                border: none;
+                                border-top-left-radius: 5px; 
+                                border-bottom-left-radius: 5px;
+                                font: bold 14px Arial;
+                            }}
+                            QPushButton:hover {{
+                                color: {self.main.menu_bg_color};
+                                background-color: {self.main.menu_highlight_color};
+                            }}
+                        """)
+        self.color_preview.setStyleSheet(
+            f"background-color: {self.main.chosen_color}; border: 2px solid {self.main.menu_bg_color_top}; border-radius: 5px;")
+        self.opacity_button.setStyleSheet(f"""
+                                    QSpinBox {{
+                                        background-color: transparent;
+                                        color: {self.main.menu_text_color};
+                                        border: 3px solid {self.main.menu_bg_color_top};
+                                        border-top-right-radius: 5px;
+                                        border-bottom-right-radius: 5px;
+                                        font: bold 12px Arial;
+                                    }}
+                                    QSpinBox:hover {{
+                                        border: 3px solid {self.main.menu_highlight_color};
+                                    }}
+                                    QSpinBox::up-button, QSpinBox::down-button {{
+                                    width: 0px;
+                                    height: 0px;
+                                    border: none;
+                                    }}
+                                """)
+
+class ExtraSection(QFrame):
+    def __init__(self, main):
+        super().__init__()
+        self.setFixedSize(520, 80)
+        self.main = main
+
+        # Background
+        self.bottom_bg_rect = QFrame(self)
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.bottom_bg_rect.setGeometry(0, 0, 520, 80)
+
+        # Title
+        self.title_shadow = QLabel("EXTRA", self)
+        self.title_shadow.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        self.title_shadow.setStyleSheet(f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title_shadow.setGeometry(0, 0, 100, 32)
+
+        self.title = QLabel("EXTRA", self)
+        self.title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.title.setGeometry(0, -4, 100, 32)
+
+        # Description
+        self.description = QLabel("Placeholder text:", self)
+        self.description.setFont(QFont("Arial", 15, QFont.Weight.Bold))
+        self.description.setStyleSheet(f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+        self.description.setGeometry(110, 0, 446, 40)
+
+    def ChangeTheme(self):
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.title_shadow.setStyleSheet(
+            f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.description.setStyleSheet(
+            f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+        self.description.setStyleSheet(
+            f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
+
+
+
+class ThemeSection(QFrame):
+    def __init__(self, main):
+        super().__init__()
+        self.setFixedSize(520, 80)
+        self.main = main
+
+        # Background
+        self.bottom_bg_rect = QFrame(self)
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.bottom_bg_rect.setGeometry(0, 0, 520, 80)
+
+        # Title
+        self.title_shadow = QLabel("THEME", self)
+        self.title_shadow.setFont(QFont("Arial", 23, QFont.Weight.Bold))
+        self.title_shadow.setStyleSheet(f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title_shadow.setGeometry(0, 0, 120, 40)
+
+        self.title = QLabel("THEME", self)
+        self.title.setFont(QFont("Arial", 23, QFont.Weight.Bold))
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+        self.title.setGeometry(0, -4, 120, 40)
+
+
+        # Buttons
+        self.shadow0 = QFrame(self)
+        self.shadow0.setStyleSheet(f"background-color: {self.main.menu_highlight_color}; border-radius: 8px;")
+        self.shadow0.setGeometry(135,  15, 30, 60)
+
+        self.shadow1 = QFrame(self)
+        self.shadow1.setStyleSheet(f"background-color: {self.main.menu_bg_color_top}; border-radius: 8px;")
+        self.shadow1.setGeometry(200, 15, 30, 60)
+
+        self.shadow2 = QFrame(self)
+        self.shadow2.setStyleSheet(f"background-color: {self.main.menu_bg_color_top}; border-radius: 8px;")
+        self.shadow2.setGeometry(270, 15, 30, 60)
+
+        self.shadow3 = QFrame(self)
+        self.shadow3.setStyleSheet(f"background-color: {self.main.menu_bg_color_top}; border-radius: 8px;")
+        self.shadow3.setGeometry(340, 15, 30, 60)
+
+        self.shadow4 = QFrame(self)
+        self.shadow4.setStyleSheet(f"background-color: {self.main.menu_bg_color_top}; border-radius: 8px;")
+        self.shadow4.setGeometry(410, 15, 30, 60)
+
+        self.shadow5 = QFrame(self)
+        self.shadow5.setStyleSheet(f"background-color: {self.main.menu_bg_color_top}; border-radius: 8px;")
+        self.shadow5.setGeometry(475, 15, 30, 60)
+
+
+
+
+
+
+
+
+        self.theme_btn0 = ThemeButton("red", "#34282C", "#9A6A79", "#B296E3", parent=self)
+        self.theme_btn0.setGeometry(135, 12, 30, 60)
+        self.theme_btn0.clicked.connect(lambda checked, idx=0: self.ThemeButtonPressed(idx))
+
+        self.theme_btn1 = ThemeButton("orange", "#4B392A", "#9F8065", "#E088A4", parent=self)
+        self.theme_btn1.setGeometry(200, 10, 30, 60)
+        self.theme_btn1.clicked.connect(lambda checked, idx=1: self.ThemeButtonPressed(idx))
+
+        self.theme_btn2 = ThemeButton("green", "#353928", "#808377", "#DA955B", parent=self)
+        self.theme_btn2.setGeometry(270, 10, 30, 60)
+        self.theme_btn2.clicked.connect(lambda checked, idx=2: self.ThemeButtonPressed(idx))
+
+        self.theme_btn3 = ThemeButton("turquoise", "#223F3A", "#748B87", "#9EB15D", parent=self)
+        self.theme_btn3.setGeometry(340, 10, 30, 60)
+        self.theme_btn3.clicked.connect(lambda checked, idx=3: self.ThemeButtonPressed(idx))
+
+        self.theme_btn4 = ThemeButton("blue", "#2F4351", "#6392B0", "#42BEA9", parent=self)
+        self.theme_btn4.setGeometry(410, 10, 30, 60)
+        self.theme_btn4.clicked.connect(lambda checked, idx=4: self.ThemeButtonPressed(idx))
+
+        self.theme_btn5 = ThemeButton("purple", "#4B4653", "#8169AB", "#5FB0E6", parent=self)
+        self.theme_btn5.setGeometry(475, 10, 30, 60)
+        self.theme_btn5.clicked.connect(lambda checked, idx=5: self.ThemeButtonPressed(idx))
+
+        self.theme_buttons = [self.theme_btn0, self.theme_btn1, self.theme_btn2, self.theme_btn3, self.theme_btn4, self.theme_btn5]
+        self.theme_shadows = [self.shadow0, self.shadow1, self.shadow2, self.shadow3, self.shadow4, self.shadow5]
+
+        self.theme_btn0.setup_style(True)
+
+    def ThemeButtonPressed(self, ind):
+        if (ind == self.main.chosen_theme_ind): return
+
+        old_ind = self.main.chosen_theme_ind
+        old_btn = self.theme_buttons[old_ind]
+        new_btn = self.theme_buttons[ind]
+
+
+
+        self.up_anim = QPropertyAnimation(old_btn, b"pos")
+        self.up_anim.setStartValue(old_btn.pos())
+        self.up_anim.setEndValue(old_btn.pos() + QPoint(0, -2))
+        self.up_anim.setDuration(200)
+        self.up_anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+
+        self.down_anim = QPropertyAnimation(new_btn, b"pos")
+        self.down_anim.setStartValue(new_btn.pos())
+        self.down_anim.setEndValue(new_btn.pos() + QPoint(0, 2))
+        self.down_anim.setDuration(200)
+        self.down_anim.setEasingCurve(QEasingCurve.Type.InQuad)
+
+        self.up_anim.start()
+        self.down_anim.start()
+
+        self.main.chosen_theme_ind = ind
+        self.main.ChangeMenuTheme(self.theme_buttons[ind].theme_name)
+
+
+    def ChangeTheme(self):
+        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
+        self.title_shadow.setStyleSheet(
+            f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
+        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
+
+        for ind, theme_btn in enumerate(self.theme_buttons):
+            if(ind == self.main.chosen_theme_ind):
+                theme_btn.setup_style(True)
+                self.theme_shadows[ind].setStyleSheet(f"background-color: {self.main.menu_highlight_color}; border-radius: 8px;")
+
+            else:
+                theme_btn.setup_style(False)
+                self.theme_shadows[ind].setStyleSheet(f"background-color: {self.main.menu_bg_color_top}; border-radius: 8px;")
+
+
+class DetailSection(QFrame):
+    def __init__(self, main):
+        super().__init__()
+        self.main = main
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self.setParent(main)
+        self.setGeometry(0, 0, main.width(), main.height())
+        self.setStyleSheet("background-color: transparent")
+
+        with open("images/Display Details.svg", "r", encoding="utf-8") as file: self.display_file = file.read()
+        with open("images/Font Details.svg", "r", encoding="utf-8") as file: self.font_file = file.read()
+        with open("images/Color Details.svg", "r", encoding="utf-8") as file: self.color_file = file.read()
+
+        self.display_details = QSvgWidget(self)
+        self.font_details = QSvgWidget(self)
+        self.color_details = QSvgWidget(self)
+
+        self.display_details.load(self.ChangeSVGColor(self.display_file))
+        self.font_details.load(self.ChangeSVGColor(self.font_file))
+        self.color_details.load(self.ChangeSVGColor(self.color_file))
+
+        self.display_details.setGeometry(70, 100, 450, 180)
+        self.font_details.setGeometry(40, 355, 440, 40)
+        self.color_details.setGeometry(150, 460, 240, 50)
+
+    def ChangeSVGColor(self, file):
+        file = file.replace('fill="#000000"', f'fill="{self.main.menu_bg_color_top}"')
+        file = file.replace('stroke="#000000"', f'stroke="{self.main.menu_bg_color_top}"')
+
+        return QByteArray(file.encode("utf-8"))
+
+    def ChangeTheme(self):
+        self.display_details.load(self.ChangeSVGColor(self.display_file))
+        self.font_details.load(self.ChangeSVGColor(self.font_file))
+        self.color_details.load(self.ChangeSVGColor(self.color_file))
+
 
 
 if __name__ == "__main__":
-    App().mainloop()
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
