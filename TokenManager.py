@@ -11,16 +11,29 @@ from flask import Flask, redirect, request, jsonify, json
 import os
 import sys
 
+import base64
+import hashlib
+import secrets
+
+def generate_code_verifier():
+    return secrets.token_urlsafe(64)
+
+def generate_code_challenge(verifier):
+    hashed = hashlib.sha256(verifier.encode()).digest()
+    return base64.urlsafe_b64encode(hashed).rstrip(b'=').decode('utf-8')
+
 
 class TokenManager():
-    def __init__(self, client_id="", client_secret="", on_token_refresh=None):
+    def __init__(self, client_id="", on_token_refresh=None):
 
         self.scope = "user-read-currently-playing user-read-playback-state"
 
         self.on_token_refresh = on_token_refresh
 
         self.CLIENT_ID = client_id
-        self.CLIENT_SECRET = client_secret
+        self.CODE_VERIFIER = generate_code_verifier()
+        self.CODE_CHALLENGE = generate_code_challenge(self.CODE_VERIFIER)
+
         self.REDIRECT_URI = "http://127.0.0.1:8888/callback"
 
         self.AUTH_URL = "https://accounts.spotify.com/authorize"
@@ -53,7 +66,9 @@ class TokenManager():
                 "client_id": self.CLIENT_ID,
                 "response_type": "code",
                 "scope": self.scope,
-                "redirect_uri": self.REDIRECT_URI
+                "redirect_uri": self.REDIRECT_URI,
+                "code_challenge_method": "S256",
+                "code_challenge": self.CODE_CHALLENGE
             }
             auth_url = f"{self.AUTH_URL}?{urllib.parse.urlencode(params)}"
             return redirect(auth_url)
@@ -69,7 +84,7 @@ class TokenManager():
                     "grant_type": "authorization_code",
                     "redirect_uri": self.REDIRECT_URI,
                     "client_id": self.CLIENT_ID,
-                    "client_secret": self.CLIENT_SECRET
+                    "code_verifier": self.CODE_VERIFIER
                 }
 
                 response = requests.post(self.TOKEN_URL, data=req_body)
@@ -91,7 +106,23 @@ class TokenManager():
 
         self.login()
 
+    def login(self):
 
+        if self.CLIENT_ID == "":
+            raise Exception("Client credentials not set")
+
+        params = {
+            "client_id": self.CLIENT_ID,
+            "response_type": "code",
+            "scope": self.scope,
+            "redirect_uri": self.REDIRECT_URI,
+            "code_challenge_method": "S256",
+            "code_challenge": self.CODE_CHALLENGE
+        }
+
+        auth_url = f"{self.AUTH_URL}?{urllib.parse.urlencode(params)}"
+
+        return redirect(auth_url)
 
     def save_session(self):
         try:
@@ -108,26 +139,6 @@ class TokenManager():
             except Exception as e:
                 print(f"Failed to load session: {e}")
         return {}
-
-
-
-
-    def login(self):
-
-        if self.CLIENT_ID == "" or self.CLIENT_SECRET == "":
-            raise Exception("Client credentials not set")
-
-        params = {
-            "client_id": self.CLIENT_ID,
-            "response_type": "code",
-            "scope": self.scope,
-            "redirect_uri": self.REDIRECT_URI,
-            "show_dialog": True
-        }
-
-        auth_url = f"{self.AUTH_URL}?{urllib.parse.urlencode(params)}"
-
-        return redirect(auth_url)
 
 
     def is_expired(self):
@@ -159,14 +170,13 @@ class TokenManager():
         if "refresh_token" not in self.session:
             raise Exception("No refresh token available, authenticate please")
 
-        if self.CLIENT_ID == "" or self.CLIENT_SECRET == "":
+        if self.CLIENT_ID == "":
             raise Exception("Client credentials not set")
 
         req_body = {
             "grant_type": "refresh_token",
             "refresh_token": self.session["refresh_token"],
-            "client_id": self.CLIENT_ID,
-            "client_secret": self.CLIENT_SECRET
+            "client_id": self.CLIENT_ID
         }
 
         response = requests.post(self.TOKEN_URL, data=req_body)

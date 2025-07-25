@@ -104,7 +104,7 @@ class MainWindow(QMainWindow):
 
         # Create a queue for thread-safe communication
         self.lyrics_queue = queue.Queue()
-        self.token_manager = TokenManager(client_id="client_id", client_secret="client_secret", on_token_refresh=self.RefreshSpotifyClient)
+        self.token_manager = TokenManager(client_id="7314df2b002f4442a5f07737b77cfab3", on_token_refresh=self.RefreshSpotifyClient)
 
         # Create central widget
         central_widget = QWidget()
@@ -1192,16 +1192,59 @@ class LoginSection(QFrame):
         self.setStyleSheet(f"background-color: {self.main.menu_bg_color_bottom}")
 
         # Description
-        self.description = QLabel("Login and catch those lyrics", self)
-        self.description.setStyleSheet(f"color: {self.main.menu_bg_color_top}; font: bold 30px Arial;")
-        self.description.setGeometry(100, 200, 500, 100)
+        self.word0 = QLabel("Login", self)
+        self.word1 = QLabel("and", self)
+        self.word2 = QLabel("start", self)
+        self.word3 = QLabel("catching", self)
+        self.word4 = QLabel("those", self)
+        self.word5 = QLabel("lyrics", self)
+
+        self.description = [self.word0, self.word1, self.word2, self.word3, self.word4, self.word5]
+
+        for word in self.description:
+            word.setObjectName("descLabel")
+            word.setStyleSheet(f"""
+                QLabel#descLabel {{
+                    background: transparent;
+                    color: {self.main.menu_bg_color_top};
+                    font: bold 30px Arial;
+                }}
+                QLabel#descLabel:hover {{
+                    color: {self.main.menu_highlight_color};
+                }}
+            """)
+
+            word.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+            word.setMouseTracking(True)
+
+        self.description[0].setGeometry(150, 260, 120, 40)
+        self.description[1].setGeometry(240, 260, 120, 40)
+        self.description[2].setGeometry(300, 260, 120, 40)
+        self.description[3].setGeometry(150, 300, 140, 40)
+        self.description[4].setGeometry(285, 300, 120, 40)
+        self.description[5].setGeometry(375, 300, 120, 40)
+
 
         # Button
+        self.shadow = QFrame(self)
+        self.shadow.setStyleSheet(f"background-color: transparent; border: 5px solid {self.main.menu_bg_color_top}; border-radius: 12px")
+        self.shadow.setGeometry(235, 365, 130, 90)
+
         self.login_button = QPushButton("Log in", self)
-        self.login_button.setStyleSheet(f"background-color: {self.main.menu_bg_color_top}; color: {self.main.menu_text_color}; border: none; border-radius: 8px")
+        self.login_button.setStyleSheet(f"""
+                                            QPushButton {{
+                                                background-color: {self.main.menu_bg_color_top}; 
+                                                color: {self.main.menu_bg_color_bottom}; 
+                                                border: none; border-radius: 8px; 
+                                                font: bold 20px Arial
+                                            }}
+                                            QPushButton:hover {{                                                       
+                                            background-color: {self.main.menu_highlight_color};
+                                            color: {self.main.menu_bg_color};
+                                            }}  
+                                        """)
         self.login_button.setGeometry(250, 380, 100, 60)
         self.login_button.clicked.connect(self.main.Login)
-
 
 
 

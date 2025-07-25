@@ -98,58 +98,61 @@ class LyricFetcher:
     def Run(self):
 
         while self.running:
-            try:
-                # Get the current track
-                current_track = self.sp.current_user_playing_track()
+            if(self.sp):
+                try:
+                    # Get the current track
+                    current_track = self.sp.current_user_playing_track()
 
-                # If the track is available and still playing
-                if current_track and current_track["is_playing"]:
-                    # Get the current id
-                    track_id = current_track["item"]["id"]
+                    # If the track is available and still playing
+                    if current_track and current_track["is_playing"]:
+                        # Get the current id
+                        track_id = current_track["item"]["id"]
 
-                    # Check if the track changed to update data
-                    if track_id != self.last_id:
-                        self.artist_name = current_track["item"]["artists"][0]["name"]
-                        self.track_name = current_track["item"]["name"]
-                        self.album_name = current_track["item"]["album"]["name"]
-                        self.duration = current_track["item"]["duration_ms"] // 1000
-                        self.last_id = track_id
+                        # Check if the track changed to update data
+                        if track_id != self.last_id:
+                            self.artist_name = current_track["item"]["artists"][0]["name"]
+                            self.track_name = current_track["item"]["name"]
+                            self.album_name = current_track["item"]["album"]["name"]
+                            self.duration = current_track["item"]["duration_ms"] // 1000
+                            self.last_id = track_id
 
-                        print(f"Playing {self.track_name} by {self.artist_name}")
+                            print(f"Playing {self.track_name} by {self.artist_name}")
 
-                        try:
-                            lyric_result = self.lrc_api.get_lyrics(
-                                track_name=self.track_name,
-                                artist_name=self.artist_name,
-                                album_name=self.album_name,
-                                duration=self.duration
-                            )
-                            if lyric_result and lyric_result.synced_lyrics:
-                                self.current_lyrics = lyric_result.synced_lyrics
-                                self.ExtractTimestamps(self.current_lyrics.splitlines())
-                            else:
+                            try:
+                                lyric_result = self.lrc_api.get_lyrics(
+                                    track_name=self.track_name,
+                                    artist_name=self.artist_name,
+                                    album_name=self.album_name,
+                                    duration=self.duration
+                                )
+                                if lyric_result and lyric_result.synced_lyrics:
+                                    self.current_lyrics = lyric_result.synced_lyrics
+                                    self.ExtractTimestamps(self.current_lyrics.splitlines())
+                                else:
+                                    self.ind = -1
+                                    print("No synced lyrics found")
+                                    self.display_lyrics = ["", "", "No lyrics for this track :(", ""]
+                                    self.callback(self.display_lyrics)
+
+                            # If no lyrics found
+                            except Exception as e:
+                                print(f"Error fetching lyrics: {e}")
                                 self.ind = -1
-                                print("No synced lyrics found")
+                                self.display_lyrics = ["", "", "No lyrics for this track :(", ""]
+                                self.callback(self.display_lyrics)
 
-                        # If no lyrics found
-                        except Exception as e:
-                            print(f"Error fetching lyrics: {e}")
-                            self.ind = -1
-                            self.display_lyrics = ["", "", "No lyrics for this track :(", ""]
+                        # Get the current progress in seconds
+                        progress = current_track["progress_ms"] / 1000
+                        lyrics_changed = self.FindLocation(progress)
+
+                        # If lyrics changed, notify the callback
+                        if lyrics_changed and self.callback:
                             self.callback(self.display_lyrics)
 
-                    # Get the current progress in seconds
-                    progress = current_track["progress_ms"] / 1000
-                    lyrics_changed = self.FindLocation(progress)
+                        time.sleep(0.5)
 
-                    # If lyrics changed, notify the callback
-                    if lyrics_changed and self.callback:
-                        self.callback(self.display_lyrics)
-
-                    time.sleep(0.5)
-
-            except Exception as e:
-                print(f"Error in lyric fetcher: {e}")
+                except Exception as e:
+                    print(f"Error in lyric fetcher: {e}")
 
     def Stop(self):
         self.running = False
