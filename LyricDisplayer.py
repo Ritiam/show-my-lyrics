@@ -26,10 +26,6 @@ class CustomLabel(QLabel):
     @font_size.setter
     def font_size(self, size):
         self._font_size = size
-        # Update the font when size changes
-        current_font = self.font()
-        current_font.setPointSizeF(size)
-        self.setFont(current_font)
         # Update position when font size changes
         self.update_position()
 
@@ -54,6 +50,8 @@ class CustomLabel(QLabel):
         self.update_position()
 
     def update_position(self):
+        if self.parent():
+            self._font_family = self.parent().chosen_font
         # Calculate y position based on font size
         font = QFont(self._font_family, int(self._font_size))
         font.setBold(True)
@@ -257,6 +255,7 @@ class DisplayWindow(QMainWindow):
 
             if not self.is_animating:
                 self.Animate()
+
 
 
 def main():

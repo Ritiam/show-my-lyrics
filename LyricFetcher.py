@@ -2,18 +2,12 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from lrclib import LrcLibAPI
 import time
-import threading
+from TokenManager import TokenManager
 
 
 
 class LyricFetcher:
     def __init__(self, callback_function):
-        self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
-            client_id="client_id",
-            client_secret="client_secret",
-            redirect_uri="http://127.0.0.1:8888/callback",
-            scope="user-read-currently-playing user-read-playback-state"
-        ))
 
         self.lrc_api = LrcLibAPI(user_agent="SpotifyLyrics/1.0")
         self.callback = callback_function
@@ -31,6 +25,8 @@ class LyricFetcher:
         self.display_lyrics = ["", "", "", ""]
         self.ind = 0
         self.wait_time = 0
+
+        self.sp = None
 
     def ExtractTimestamps(self, temp_lyrics):
         self.ind = 0
@@ -52,7 +48,8 @@ class LyricFetcher:
                 seconds = float(seconds)
                 total_time = minutes * 60 + seconds
 
-                raw_lyrics = "(...)" if raw_lyrics == " " else raw_lyrics
+                if raw_lyrics.strip() == "":
+                    raw_lyrics = "(...)"
 
                 self.timestamps.append(total_time)
                 self.lyrics.append(raw_lyrics[1:] if raw_lyrics.startswith(' ') else raw_lyrics)
@@ -99,8 +96,9 @@ class LyricFetcher:
             self.display_lyrics[3] = self.lyrics[ind + 1]
 
     def Run(self):
-        try:
-            while self.running:
+
+        while self.running:
+            try:
                 # Get the current track
                 current_track = self.sp.current_user_playing_track()
 
@@ -148,11 +146,10 @@ class LyricFetcher:
                     if lyrics_changed and self.callback:
                         self.callback(self.display_lyrics)
 
-                    time.sleep(0.1)
+                    time.sleep(0.5)
 
-
-        except Exception as e:
-            print(f"Error in lyric fetcher: {e}")
+            except Exception as e:
+                print(f"Error in lyric fetcher: {e}")
 
     def Stop(self):
         self.running = False
