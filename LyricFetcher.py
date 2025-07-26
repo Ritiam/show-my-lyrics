@@ -1,8 +1,6 @@
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
 from lrclib import LrcLibAPI
 import time
-from TokenManager import TokenManager
 
 
 
@@ -61,6 +59,7 @@ class LyricFetcher:
             self.lyrics.append("")
 
     def FindLocation(self, progress):
+        # Find where we are in the song
         if self.ind == -1:
             return False
 
@@ -74,16 +73,18 @@ class LyricFetcher:
             self.ind -= 1
 
         if self.ind < track_length - 1:
-            self.wait_time = self.timestamps[self.ind] - progress -0.1
+            self.wait_time = self.timestamps[self.ind] - progress - 0.1
         else:
             self.wait_time = 0
 
+        # The lyrics changed
         if old_ind != self.ind:
             self.PrepareLyrics(self.ind)
-            return True  # Lyrics changed
+            return True
         return False
 
     def PrepareLyrics(self, ind):
+        # Update lyrics to new ones
         self.display_lyrics = ["", "", "", ""]
 
         if ind >= 2:

@@ -9,7 +9,6 @@ import spotipy
 from flask import Flask, redirect, request, jsonify, json
 
 import os
-import sys
 
 import base64
 import hashlib
@@ -100,7 +99,6 @@ class TokenManager():
                     return "Failed to obtain token."
 
     def start_server(self):
-        # Run Flask in a separate thread
         threading.Thread(target=lambda: self.app.run(port=8888, debug=False, use_reloader=False), daemon=True).start()
         webbrowser.open("http://127.0.0.1:8888/login")
 
@@ -192,7 +190,7 @@ class TokenManager():
             self.save_session()
 
             if self.on_token_refresh:
-                self.on_token_refresh()
+                threading.Timer(0.1, self.on_token_refresh).start()
 
         else:
             raise Exception("No valid token available")

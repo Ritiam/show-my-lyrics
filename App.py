@@ -1,6 +1,5 @@
 import sys
 import threading
-import time
 import queue
 import json
 import os
@@ -8,7 +7,7 @@ import os
 from PyQt6.QtSvgWidgets import QSvgWidget
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QLabel, QFrame, QColorDialog, QPushButton, QComboBox, QSpinBox
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QTimer, QByteArray
-from PyQt6.QtGui import QFont, QColor, QPainter
+from PyQt6.QtGui import QFont, QColor, QPainter, QIcon
 
 from LyricDisplayer import DisplayWindow
 from TokenManager import TokenManager
@@ -78,6 +77,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Show My Lyrics")
         self.setFixedSize(600, 800)
 
+        if hasattr(sys, '_MEIPASS'):
+            icon_path = os.path.join(sys._MEIPASS, "images/icon.png")
+        else: icon_path = os.path.join(os.path.abspath("."), "images/icon.png")
+        app.setWindowIcon(QIcon(icon_path))
+
         self.settings_file = "settings.json"
 
         # Lyrics Data
@@ -102,8 +106,7 @@ class MainWindow(QMainWindow):
 
         self.setStyleSheet(f"background-color: {self.menu_bg_color_bottom};")
 
-        # Create a queue for thread-safe communication
-        self.lyrics_queue = queue.Queue()
+        # Set the token manager
         self.token_manager = TokenManager(client_id="7314df2b002f4442a5f07737b77cfab3", on_token_refresh=self.RefreshSpotifyClient)
 
         # Create central widget
@@ -115,11 +118,10 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(20)
         main_layout.setContentsMargins(40, 40, 40, 40)
 
-        # Create the 5 sections
+        # Create the sections
         self.display_section = DisplaySection(self)
         self.font_section = FontSection(self)
         self.color_section = ColorSection(self)
-        self.extra_section = ExtraSection(self)
         self.theme_section = ThemeSection(self)
         self.details = DetailSection(self)
         self.login = LoginSection(self)
@@ -128,13 +130,13 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.display_section)
         main_layout.addWidget(self.font_section)
         main_layout.addWidget(self.color_section)
-        main_layout.addWidget(self.extra_section)
         main_layout.addWidget(self.theme_section)
 
         # Instantiate necessary things
         self.display_window = DisplayWindow()
         self.lyrics_queue = queue.Queue()
 
+        # Start LyricFetcher
         self.lyric_fetcher = LyricFetcher(self.OnLyricsChange)
         self.fetcher_thread = threading.Thread(target=self.lyric_fetcher.Run, daemon=True)
         self.fetcher_thread.start()
@@ -149,6 +151,7 @@ class MainWindow(QMainWindow):
         self.CheckLoginRemoval()
 
 
+    # Function to change menu theme according to a certain color
     def ChangeMenuTheme(self, color):
         if color == "red":
             self.menu_bg_color_bottom = "#34282C"
@@ -194,16 +197,17 @@ class MainWindow(QMainWindow):
 
         self.ApplyMenuTheme()
 
+    # Function to apply the color change to all components
     def ApplyMenuTheme(self):
         self.setStyleSheet(f"background-color: {self.menu_bg_color_bottom};")
 
         self.display_section.ChangeTheme()
         self.font_section.ChangeTheme()
         self.color_section.ChangeTheme()
-        self.extra_section.ChangeTheme()
         self.theme_section.ChangeTheme()
         self.details.ChangeTheme()
 
+    # Function to apply lyrics customization to our display window
     def UpdateDisplaySettings(self):
         if hasattr(self, "display_window"):
             self.display_window.UpdateCustomization(
@@ -218,6 +222,7 @@ class MainWindow(QMainWindow):
                 underline=self.chosen_underline
             )
 
+    # Function to get lyrics from our queue
     def ProcessLyricsQueue(self):
         try:
             while not self.lyrics_queue.empty():
@@ -229,9 +234,11 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(250, self.ProcessLyricsQueue)
 
+    # Function to put lyrics into the queue
     def OnLyricsChange(self, lyrics_data):
         self.lyrics_queue.put(lyrics_data)
 
+    # Function that works when we close the main window
     def closeEvent(self, event):
         if hasattr(self, 'lyric_fetcher'):
             self.lyric_fetcher.Stop()
@@ -239,10 +246,12 @@ class MainWindow(QMainWindow):
             self.display_window.close()
         event.accept()
 
+    # Function connected to the login button if the user is not authenticated yet
     def Login(self):
         self.token_manager.start_server()
         self.CheckLoginRemoval()
 
+    # Function to check if user logged in, to remove login block
     def CheckLoginRemoval(self):
         if self.token_manager.is_session_valid():
             self.login.hide()
@@ -252,10 +261,12 @@ class MainWindow(QMainWindow):
         else:
             QTimer.singleShot(1000, self.CheckLoginRemoval)
 
+    # Function to refresh spotify client after changing tokens
     def RefreshSpotifyClient(self):
         sp = self.token_manager.create_spotify_client()
         self.lyric_fetcher.sp = sp
 
+    # Function to save customization settings
     def SaveSettings(self):
         data = {
             "chosen_font": self.chosen_font,
@@ -273,6 +284,7 @@ class MainWindow(QMainWindow):
         with open(self.settings_file, "w") as f:
             json.dump(data, f)
 
+    # Function to load customization settings
     def LoadSettings(self):
         if os.path.exists(self.settings_file):
             try:
@@ -908,7 +920,6 @@ class ColorSection(QFrame):
         dialog = QColorDialog(self)
         dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
 
-        # Apply your custom stylesheet here
         dialog.setStyleSheet(f"""
                 /* Customize the Qt color dialog here */
                 QWidget {{
@@ -978,44 +989,6 @@ class ColorSection(QFrame):
                                     border: none;
                                     }}
                                 """)
-
-class ExtraSection(QFrame):
-    def __init__(self, main):
-        super().__init__()
-        self.setFixedSize(520, 80)
-        self.main = main
-
-        # Background
-        self.bottom_bg_rect = QFrame(self)
-        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
-        self.bottom_bg_rect.setGeometry(0, 0, 520, 80)
-
-        # Title
-        self.title_shadow = QLabel("EXTRA", self)
-        self.title_shadow.setFont(QFont("Arial", 20, QFont.Weight.Bold))
-        self.title_shadow.setStyleSheet(f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
-        self.title_shadow.setGeometry(0, 0, 100, 32)
-
-        self.title = QLabel("EXTRA", self)
-        self.title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
-        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
-        self.title.setGeometry(0, -4, 100, 32)
-
-        # Description
-        self.description = QLabel("Will add more features here", self)
-        self.description.setFont(QFont("Arial", 15, QFont.Weight.Bold))
-        self.description.setStyleSheet(f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
-        self.description.setGeometry(110, 0, 446, 40)
-
-    def ChangeTheme(self):
-        self.bottom_bg_rect.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 10")
-        self.title_shadow.setStyleSheet(
-            f"color: {self.main.menu_highlight_color}; background: {self.main.menu_bg_color_bottom};")
-        self.title.setStyleSheet(f"color: {self.main.menu_bg_color}; background: transparent;")
-        self.description.setStyleSheet(
-            f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
-        self.description.setStyleSheet(
-            f"color: {self.main.menu_text_color}; background-color: transparent; padding: 10px;")
 
 
 
@@ -1154,9 +1127,14 @@ class DetailSection(QFrame):
         self.setGeometry(0, 0, main.width(), main.height())
         self.setStyleSheet("background-color: transparent")
 
-        with open("images/Display Details.svg", "r", encoding="utf-8") as file: self.display_file = file.read()
-        with open("images/Font Details.svg", "r", encoding="utf-8") as file: self.font_file = file.read()
-        with open("images/Color Details.svg", "r", encoding="utf-8") as file: self.color_file = file.read()
+        with open(self.ResourcePath("images/Display Details.svg"), "r", encoding="utf-8") as file:
+            self.display_file = file.read()
+
+        with open(self.ResourcePath("images/Font Details.svg"), "r", encoding="utf-8") as file:
+            self.font_file = file.read()
+
+        with open(self.ResourcePath("images/Color Details.svg"), "r", encoding="utf-8") as file:
+            self.color_file = file.read()
 
         self.display_details = QSvgWidget(self)
         self.font_details = QSvgWidget(self)
@@ -1166,9 +1144,13 @@ class DetailSection(QFrame):
         self.font_details.load(self.ChangeSVGColor(self.font_file))
         self.color_details.load(self.ChangeSVGColor(self.color_file))
 
-        self.display_details.setGeometry(70, 100, 450, 180)
-        self.font_details.setGeometry(40, 355, 440, 40)
-        self.color_details.setGeometry(150, 460, 240, 50)
+        self.display_details.setGeometry(70, 124, 450, 180)
+        self.font_details.setGeometry(40, 404, 440, 40)
+        self.color_details.setGeometry(150, 534, 240, 50)
+
+    def ResourcePath(self, relative_path):
+        base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
+        return os.path.join(base_path, relative_path)
 
     def ChangeSVGColor(self, file):
         file = file.replace('fill="#000000"', f'fill="{self.main.menu_bg_color_top}"')
@@ -1190,6 +1172,11 @@ class LoginSection(QFrame):
         self.setParent(main)
         self.setGeometry(0, 0, main.width(), main.height())
         self.setStyleSheet(f"background-color: {self.main.menu_bg_color_bottom}")
+
+        # Background
+        self.background = QFrame(self)
+        self.background.setStyleSheet(f"background-color: {self.main.menu_bg_color}; border-radius: 12px")
+        self.background.setGeometry(100, 200, 400, 300)
 
         # Description
         self.word0 = QLabel("Login", self)

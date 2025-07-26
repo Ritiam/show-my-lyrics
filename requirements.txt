@@ -1,0 +1,5 @@
+PyQt6>=6.0.0
+spotipy>=2.22.1
+requests>=2.31.0
+Flask>=2.3.0
+lrclibapi>=0.3.1

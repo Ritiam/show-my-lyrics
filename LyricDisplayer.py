@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QGraphicsOpacityEffect
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, pyqtProperty
-from PyQt6.QtGui import QFont, QColor, QPalette, QFontMetrics, QKeyEvent
+from PyQt6.QtGui import QFont, QFontMetrics, QKeyEvent
 
 
 
@@ -14,7 +14,7 @@ class CustomLabel(QLabel):
 
         self.setWordWrap(True)
 
-        # Create opacity effect for the label
+        # Create an opacity effect for the label
         self._opacity_effect = QGraphicsOpacityEffect()
         self._opacity_effect.setOpacity(1.0)
         self.setGraphicsEffect(self._opacity_effect)
@@ -26,7 +26,7 @@ class CustomLabel(QLabel):
     @font_size.setter
     def font_size(self, size):
         self._font_size = size
-        # Update position when font size changes
+        # Update position when font size changes to relatively center it
         self.update_position()
 
     @pyqtProperty(float)
@@ -52,11 +52,13 @@ class CustomLabel(QLabel):
     def update_position(self):
         if self.parent():
             self._font_family = self.parent().chosen_font
+
         # Calculate y position based on font size
         font = QFont(self._font_family, int(self._font_size))
         font.setBold(True)
         metrics = QFontMetrics(font)
         text_height = metrics.height()
+
         y_pos = int(self._y_position - (text_height // 2))
         self.setGeometry(0, y_pos, 640, 1080)
 
@@ -257,16 +259,3 @@ class DisplayWindow(QMainWindow):
                 self.Animate()
 
 
-
-def main():
-    app = QApplication(sys.argv)
-
-    # Create window with default settings
-    window = DisplayWindow()
-    window.show()
-
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()
